@@ -726,6 +726,17 @@ class MainWindow(Gtk.ApplicationWindow):
             self._opened()
 
     def _body_failed(self, m: Message, e: Exception):
+        from ..imap import MessageGone
+        if isinstance(e, MessageGone):
+            # It vanished on the server: drop it quietly instead of announcing an error.
+            self.store.delete(m.account_id, m.folder, [m.uid])
+            if self.folder and m.folder == self.folder.path:
+                if self.shown_key == m.key:
+                    self.shown_key = None
+                self._populate([x for x in self.messages if x.key != m.key],
+                               keep_pos=self.msg_sel.get_selected())
+            self._set_status("A message that was removed on the server was taken off the list")
+            return
         if self.shown_key == m.key:
             self.shown_key = None
             self.body.get_buffer().set_text(f"This message couldn't be loaded.\n\n{e}")
@@ -876,9 +887,13 @@ class MainWindow(Gtk.ApplicationWindow):
         if item and unread:
             item.unread = max(0, item.unread - unread)
             item.revision += 1
-        self._populate([m for m in self.messages if m.key not in gone], keep_pos=pos)
-        what = f"conversation, {len(msgs)} messages" if len(msgs) > 1 else ""
-        self.say(f"{spoken} {what}".strip())
+        remaining = [m for m in self.messages if m.key not in gone]
+        self._populate(remaining, keep_pos=pos)
+        what = f" conversation, {len(msgs)} messages" if len(msgs) > 1 else ""
+        left = len(remaining)
+        where = self.folder.display_name
+        tail = f"{where} is now empty" if left == 0 else f"{left} left in {where}"
+        self.say(f"{spoken}{what}. {tail}")
         on_error = lambda e: (self._error(e), self.sync_current())  # noqa: E731
         if forever:
             sess.submit(sess.delete_forever, path, uids, on_error=on_error)

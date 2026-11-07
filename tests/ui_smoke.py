@@ -286,6 +286,38 @@ def account_added(win):
 
 
 @step(800)
+def delete_during_refresh(win):
+    win.go_inbox()
+    import time as _t
+    mb().add("INBOX", _raw(600, "Spam Co <spam@example.com>", "Buy now", "!!", _t.time(), "t600"),
+             {"\\seen"}, "t600")
+    win.sync_current()  # bring it into the list first
+
+
+@step(1200)
+def delete_during_refresh_go(win):
+    on_server = set(mb().folders["INBOX"])
+    newest = max((m for m in win.messages if m.uid in on_server), key=lambda m: m.uid)
+    win._race_key = newest.key
+    FakeClient.select_delay = 0.6
+    win.sync_current()               # a refresh starts...
+    trash = win._special("trash")
+    win._remove([newest], trash, "Deleted")   # ...and the newest message is deleted meanwhile
+    win._race_said = win.status.get_text()
+
+
+@step(2000)
+def deleted_stays_gone(win):
+    FakeClient.select_delay = 0.0
+    keys = {m.key for m in win.messages}
+    check("message deleted during a refresh stays gone from the list", win._race_key not in keys)
+    uid = win._race_key[-1] if isinstance(win._race_key, tuple) else None
+    check("and from the cache", uid is None or uid not in win.store.uids(win.account.id, "INBOX"))
+    check("says how many are left", win._race_said.startswith("Deleted. ") and
+          (" left in Inbox" in win._race_said or "is now empty" in win._race_said), win._race_said)
+
+
+@step(800)
 def new_mail_arrives(win):
     import time as _t
     win.cfg.settings.new_mail_sound = win.cfg.settings.new_mail_announce = True

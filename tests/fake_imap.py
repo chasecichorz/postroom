@@ -66,6 +66,7 @@ class Mailbox:
 class FakeClient:
     mailbox: Mailbox | None = None
     fail_login = False
+    select_delay = 0.0  # seconds; lets a test act while a folder refresh is still running
 
     def __init__(self, account, password):
         self.account = account
@@ -97,6 +98,9 @@ class FakeClient:
         return len(msgs), sum(1 for _, f in msgs.values() if "\\seen" not in f)
 
     def select(self, path, readonly=False):
+        if FakeClient.select_delay:
+            import time as _t
+            _t.sleep(FakeClient.select_delay)
         self.selected = path
         return len(self.mb.folders[path]), self.mb.uidvalidity
 

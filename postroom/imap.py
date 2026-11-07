@@ -41,6 +41,10 @@ class ImapError(Exception):
     pass
 
 
+class MessageGone(ImapError):
+    """The message was moved or deleted on the server (for example Gmail emptying Spam)."""
+
+
 def quote(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -296,7 +300,7 @@ class ImapClient:
         for _meta, lit in iter_fetch(data):
             if lit is not None:
                 return lit
-        raise ImapError("The message is no longer on the server.")
+        raise MessageGone("The message is no longer on the server.")
 
     def set_flags(self, folder: str, uids: list[int], flags: str, add: bool) -> None:
         c = self._c()
