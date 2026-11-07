@@ -1,0 +1,5 @@
+#!/bin/sh
+# Start Mailpane from this checkout.
+here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m mailpane "$@"

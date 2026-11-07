@@ -1,0 +1,175 @@
+"""One background worker per account. All IMAP traffic happens here, never on the UI thread.
+
+Each operation runs on the account's single worker thread (so commands never interleave on
+the one IMAP connection) and its result is handed back to the GTK main loop.
+"""
+from __future__ import annotations
+
+import concurrent.futures
+import logging
+from dataclasses import dataclass
+
+from gi.repository import GLib
+
+from . import passwords, sending
+from .config import Account
+from .imap import NETWORK_ERRORS, ImapClient, ImapError
+from .models import Folder, Message
+from .store import Store
+
+log = logging.getLogger(__name__)
+
+# How many of the newest messages per folder are kept locally.
+WINDOW = 1000
+FIRST_SYNC = 500
+
+
+@dataclass
+class SyncResult:
+    new: list[Message]
+    changed: bool
+
+
+def _on_main(fn, *args):
+    def run():
+        fn(*args)
+        return GLib.SOURCE_REMOVE
+    GLib.idle_add(run)
+
+
+class AccountSession:
+    def __init__(self, account: Account, store: Store):
+        self.account = account
+        self.store = store
+        self.client: ImapClient | None = None
+        self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=1,
+                                                          thread_name_prefix=f"imap-{account.name}")
+        self.folders: list[Folder] = []
+
+    def submit(self, fn, *args, on_done=None, on_error=None):
+        def job():
+            try:
+                result = fn(*args)
+            except Exception as e:  # noqa: BLE001 - reported to the UI
+                log.exception("%s failed", getattr(fn, "__name__", fn))
+                if on_error:
+                    _on_main(on_error, e)
+            else:
+                if on_done:
+                    _on_main(on_done, result)
+        self.pool.submit(job)
+
+    def shutdown(self):
+        def bye():
+            if self.client:
+                self.client.close()
+        self.pool.submit(bye)
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
+    # -- runs on the worker thread ----------------------------------------------------------
+    def _client(self) -> ImapClient:
+        if self.client is None:
+            pw = passwords.lookup(self.account.id)
+            if not pw:
+                raise ImapError("No password is saved for this account.")
+            self.client = ImapClient(self.account, pw)
+        return self.client
+
+    def _run(self, op):
+        """Run op(client); on a dropped connection, reconnect once and retry."""
+        c = self._client()
+        try:
+            return op(c)
+        except NETWORK_ERRORS:
+            c.close()
+            return op(c)
+
+    def list_folders(self) -> list[Folder]:
+        folders = self._run(lambda c: c.list_folders())
+        self.store.save_folders(self.account.id, folders)
+        self.folders = folders
+        return folders
+
+    def folder_counts(self, paths: list[str]) -> dict[str, tuple[int, int]]:
+        out = {}
+        for p in paths:
+            try:
+                out[p] = self._run(lambda c, p=p: c.status(p))
+            except ImapError:
+                pass
+        return out
+
+    def sync_folder(self, path: str) -> SyncResult:
+        acct = self.account.id
+
+        def op(c: ImapClient) -> SyncResult:
+            exists, uidvalidity = c.select(path)
+            if self.store.uidvalidity(acct, path) != uidvalidity:
+                self.store.reset_folder(acct, path, uidvalidity)
+            cached = self.store.uids(acct, path)
+            if exists == 0:
+                self.store.delete(acct, path, cached)
+                return SyncResult([], bool(cached))
+            changed = False
+            if not cached:
+                start = max(1, exists - FIRST_SYNC + 1)
+                new = c.fetch_headers(path, f"{start}:{exists}", by_uid=False)
+            else:
+                top = cached[-1]
+                new = [m for m in c.fetch_headers(path, f"{top + 1}:*", by_uid=True) if m.uid > top]
+                flags = c.fetch_flags(path, f"{cached[0]}:{top}")
+                gone = set(cached) - set(flags)
+                if gone:
+                    self.store.delete(acct, path, gone)
+                    changed = True
+                changed |= self.store.update_flags(acct, path, flags) > 0
+            self.store.upsert(new)
+            self.store.trim(acct, path, WINDOW)
+            return SyncResult(new, changed or bool(new))
+        return self._run(op)
+
+    def fetch_body(self, path: str, uid: int) -> bytes:
+        raw = self.store.body(self.account.id, path, uid)
+        if raw is None:
+            raw = self._run(lambda c: c.fetch_body(path, uid))
+            self.store.save_body(self.account.id, path, uid, raw)
+        return raw
+
+    def set_flag(self, path: str, uids: list[int], flag: str, on: bool) -> None:
+        self._run(lambda c: c.set_flags(path, uids, flag, on))
+
+    def move(self, path: str, uids: list[int], dest: str) -> None:
+        self._run(lambda c: c.move(path, uids, dest))
+        self.store.delete(self.account.id, path, uids)
+
+    def delete_forever(self, path: str, uids: list[int]) -> None:
+        self._run(lambda c: c.delete_forever(path, uids))
+        self.store.delete(self.account.id, path, uids)
+
+    def send(self, draft: sending.Draft) -> None:
+        pw = passwords.lookup(self.account.id)
+        if not pw:
+            raise sending.SendError("No password is saved for this account.")
+        msg = sending.build(self.account, draft)
+        sending.send(self.account, pw, msg)
+        # Gmail files sent mail by itself; other servers need a copy in Sent.
+        if not self.account.is_gmail:
+            sent = next((f for f in self.folders if f.special == "sent"), None)
+            if sent:
+                try:
+                    self._run(lambda c: c.append(sent.path, msg.as_bytes()))
+                except Exception:  # noqa: BLE001 - the mail went out; the copy is a nicety
+                    log.exception("saving to Sent failed")
+        if draft.reply_source:
+            _acct, folder, uid = draft.reply_source
+            try:
+                self._run(lambda c: c.set_flags(folder, [uid], "\\Answered", True))
+            except Exception:  # noqa: BLE001
+                log.exception("marking answered failed")
+
+
+def check_login(account: Account, password: str) -> None:
+    """Try signing in; raises ImapError with a readable message on failure."""
+    c = ImapClient(account, password)
+    c.connect()
+    c.close()

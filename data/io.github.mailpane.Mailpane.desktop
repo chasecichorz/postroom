@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Mailpane
+Comment=Keyboard-first email, laid out like QuickMail
+Exec=mailpane
+Icon=mail-unread
+Terminal=false
+Categories=Network;Email;
