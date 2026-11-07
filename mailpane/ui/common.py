@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GObject, Gtk
 
 CSS = b"""
 .unread { font-weight: bold; }
@@ -39,6 +39,51 @@ def set_label(widget: Gtk.Widget, text: str) -> None:
 
 def set_description(widget: Gtk.Widget, text: str) -> None:
     widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [text])
+
+
+def _walk(widget: Gtk.Widget):
+    stack = [widget]
+    while stack:
+        w = stack.pop()
+        yield w
+        child = w.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+
+
+def _name_items(popover: Gtk.Widget) -> None:
+    for w in _walk(popover):
+        if GObject.type_name(w.__gtype__) == "GtkModelButton":
+            text = (w.get_property("text") or "").replace("_", "")
+            if text:
+                w.reset_relation(Gtk.AccessibleRelation.LABELLED_BY)
+                set_label(w, text)
+
+
+def label_menu_items(widget: Gtk.Widget) -> None:
+    """Name every item in the popover menus under `widget`.
+
+    In GTK 4.24 a popover menu item takes its name from an internal label that reports an
+    empty name, so screen readers hear only "menu item" and the shortcut. Give each item
+    its text directly. GTK restores the broken link when it fills in shortcuts, so do it
+    each time a menu opens.
+    """
+    for w in _walk(widget):
+        if isinstance(w, Gtk.Popover) and not getattr(w, "_mailpane_labels", False):
+            w._mailpane_labels = True
+            w.connect("map", _name_items)
+            _name_items(w)
+
+
+def standalone_window(win: Gtk.Window, parent: Gtk.Window) -> None:
+    """Make `win` an ordinary window rather than a dialog over `parent`.
+
+    Tiling window managers such as i3 float dialogs, and Alt+Tab (focus left/right) cannot
+    leave a floating window. An ordinary window tiles like any other, so Alt+Tab works.
+    When it closes, the main window is brought back.
+    """
+    win.connect("close-request", lambda *_: (parent.present(), False)[1])
 
 
 def focus_within(window: Gtk.Window, widget: Gtk.Widget) -> bool:

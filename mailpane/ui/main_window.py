@@ -11,8 +11,8 @@ from ..config import APP_NAME, Account
 from ..folder_tree import FolderNode
 from ..models import Folder, Message
 from ..session import AccountSession
-from .common import (TypeAhead, announce, focus_list, focus_within, mods, select_and_focus,
-                     set_description, set_label)
+from .common import (TypeAhead, announce, focus_list, focus_within, label_menu_items, mods,
+                     select_and_focus, set_description, set_label)
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +195,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.msg_menu = Gtk.PopoverMenu.new_from_model(self.app.message_menu_model)
         self.msg_menu.set_parent(self.msg_view)
         self.msg_menu.set_has_arrow(False)
+        label_menu_items(self.menubar)
+        label_menu_items(self.msg_menu)
 
         # Reading pane: attachments (when any), then the message as text.
         reading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

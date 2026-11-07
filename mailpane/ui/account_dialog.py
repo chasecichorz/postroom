@@ -10,7 +10,7 @@ from .. import passwords
 from ..config import Account
 from ..imap import ImapError
 from ..session import check_login
-from .common import announce, set_description, set_label
+from .common import announce, set_description, set_label, standalone_window
 
 GMAIL_HELP = ("For Gmail, use an app password, not your normal password. Create one at "
               "myaccount.google.com/apppasswords. Two-step verification has to be turned on.")
@@ -18,8 +18,8 @@ GMAIL_HELP = ("For Gmail, use an app password, not your normal password. Create 
 
 class AccountDialog(Gtk.Window):
     def __init__(self, parent, account: Account | None, on_saved):
-        super().__init__(transient_for=parent, modal=True, default_width=520,
-                         title="Edit Account" if account else "Add Account")
+        super().__init__(default_width=520, title="Edit Account" if account else "Add Account")
+        standalone_window(self, parent)
         self.parent_win = parent
         self.account = account
         self.on_saved = on_saved

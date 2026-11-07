@@ -5,15 +5,15 @@ from gi.repository import Gdk, GLib, Gtk
 
 from ..folder_tree import FolderNode
 from ..models import Folder
-from .common import announce, focus_within, mods, set_label
+from .common import announce, focus_within, mods, set_label, standalone_window
 
 
 class _Picker(Gtk.Window):
     """A filter box above a list. Type to narrow, Down to reach the list, Enter to choose."""
 
     def __init__(self, parent, title: str, filter_label: str, entries: list[tuple[str, object]], on_pick):
-        super().__init__(transient_for=parent, modal=True, title=title, default_width=480,
-                         default_height=420)
+        super().__init__(title=title, default_width=480, default_height=420)
+        standalone_window(self, parent)
         self.entries, self.on_pick = entries, on_pick
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12,
                       margin_bottom=12, margin_start=12, margin_end=12)
@@ -154,8 +154,8 @@ Ctrl+Enter or Alt+S: send.  Escape: close (asks before discarding)
 
 class ShortcutsWindow(Gtk.Window):
     def __init__(self, parent):
-        super().__init__(transient_for=parent, modal=True, title="Keyboard Shortcuts",
-                         default_width=640, default_height=560)
+        super().__init__(title="Keyboard Shortcuts", default_width=640, default_height=560)
+        standalone_window(self, parent)
         view = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD,
                             left_margin=12, right_margin=12, top_margin=12, bottom_margin=12)
         set_label(view, "Keyboard shortcuts")
