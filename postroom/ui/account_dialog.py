@@ -258,7 +258,10 @@ class AccountDialog(Gtk.Window):
         self._show_error(msg, focus)
 
     def _done(self, acct: Account):
+        note = getattr(self, "_note", None)
         self.on_saved(acct, self.account is None)
+        if note:
+            GLib.timeout_add(1500, lambda: (announce(self.parent_win, note, important=True), False)[1])
         self.destroy()
 
     def _email(self) -> str | None:
@@ -312,6 +315,10 @@ class AccountDialog(Gtk.Window):
                           and False)
             check_login(acct, tokens.access_token)
             credentials.save_oauth(acct, tokens)
+            if acct.is_gmail and not tokens.grants(oauth2.GOOGLE_CONTACTS_SCOPE):
+                self._note = ("Signed in for mail. Google didn't allow contacts, so Postroom "
+                              "can't bring in your Google contacts. To add them, sign in again "
+                              "and tick the box for contacts on Google's page.")
             GLib.idle_add(lambda: self._done(acct) and False)
         self._start(email, "oauth2", work)
 

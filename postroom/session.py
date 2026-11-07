@@ -177,6 +177,7 @@ class AccountSession:
         except credentials.CredentialError as e:
             return str(e) if force else None
         if not credentials.grants(self.account, oauth2.GOOGLE_CONTACTS_SCOPE):
+            log.info("Google contacts: the sign-in does not include contacts access")
             return ("To bring in your Google contacts, sign in again so Postroom may read them: "
                     "File, Edit Account, then Sign in with browser.") if force else None
         try:
@@ -187,6 +188,7 @@ class AccountSession:
         self.store.add_contacts(found)
         self.store.set_meta(key, str(time.time()))
         n = len({c.email for c in found})
+        log.info("Google contacts: %d addresses read", n)
         return f"{n} Google contact{'s' if n != 1 else ''} in the address book"
 
     def fetch_body(self, path: str, uid: int) -> bytes:
