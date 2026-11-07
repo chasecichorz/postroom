@@ -229,11 +229,12 @@ def subfolder(win):
     check("Projects messages", [x[1] for x in rows(win)] == ["Kickoff"], str(rows(win)))
     check("folder still focused", focus_name(win) == "folders", focus_name(win))
     order = []
-    for _ in range(5):
+    for _ in range(6):
         win.cycle_pane(1)
         order.append(focus_name(win))
-    check("F6 cycles the four panes", order == ["messages", "reading", "accounts", "folders", "messages"],
-          str(order))
+    check("F6 cycles the panes and status bar, like QuickMail",
+          order == ["messages", "reading", "status", "accounts", "folders", "messages"], str(order))
+    check("status bar is not a Tab stop once left", not win.status.get_focusable())
     win.focus_folders()
     win.go_inbox()
 
