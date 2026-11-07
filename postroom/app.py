@@ -88,6 +88,8 @@ class PostroomApp(Gtk.Application):
             [("_Check for Mail", "win.refresh")],
             [("Group into _Conversations", "win.conversations"),
              ("Read the _Formatted Version", "win.prefer-html")],
+            [("Play a Sou_nd for New Mail", "win.new-mail-sound"),
+             ("Sa_y Who New Mail Is From", "win.new-mail-announce")],
             [("Next _Unread Message", "win.next-unread"),
              ("_Previous Unread Message", "win.prev-unread")],
             [("Go to _Inbox", "win.go-inbox"), ("Go to _Accounts", "win.focus-accounts"), ("Go to F_olders", "win.focus-folders"),

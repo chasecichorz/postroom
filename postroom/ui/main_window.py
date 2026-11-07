@@ -6,7 +6,7 @@ import time
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
-from .. import credentials, folder_tree, mime, passwords, threads
+from .. import credentials, folder_tree, mime, passwords, sounds, threads
 from ..config import APP_NAME, Account
 from ..folder_tree import FolderNode
 from ..models import Folder, Message
@@ -278,7 +278,10 @@ class MainWindow(Gtk.ApplicationWindow):
             self.add_action(a)
         s = self.cfg.settings
         for name, value, fn in (("conversations", s.conversations, self._set_conversations),
-                                ("prefer-html", s.prefer_html, self._set_prefer_html)):
+                                ("prefer-html", s.prefer_html, self._set_prefer_html),
+                                ("new-mail-sound", s.new_mail_sound, self._set_new_mail_sound),
+                                ("new-mail-announce", s.new_mail_announce,
+                                 self._set_new_mail_announce)):
             a = Gio.SimpleAction.new_stateful(name, None, GLib.Variant.new_boolean(value))
             a.connect("change-state", lambda act, v, fn=fn: (act.set_state(v), fn(v.get_boolean())))
             self.add_action(a)
@@ -1014,9 +1017,27 @@ class MainWindow(Gtk.ApplicationWindow):
         self._update_status()
         sess = self.sessions[acct.id]
         sess.submit(sess.folder_counts, [path], on_done=lambda c: self._counts_loaded(acct, c))
-        fresh = [m for m in result.new if not m.seen]
-        if announce_new and fresh:
-            self.say(f"{len(fresh)} new message{'s' if len(fresh) > 1 else ''}")
+        if announce_new:
+            self._notify_new(acct, result)
+
+    def _notify_new(self, acct: Account, result):
+        """Chime and say who new mail is from. Never for a folder's first download."""
+        fresh = sorted((m for m in result.new if not m.seen), key=lambda m: m.date_ts)
+        if result.first or not fresh:
+            return
+        s = self.cfg.settings
+        if s.new_mail_sound:
+            sounds.play_new_mail()
+        if not s.new_mail_announce:
+            return
+        latest = fresh[-1]
+        who = latest.from_name or latest.from_addr or "unknown sender"
+        where = f"In {acct.name}: " if len(self.cfg.accounts) > 1 else ""
+        if len(fresh) == 1:
+            text = f"{where}New mail from {who}: {latest.subject or 'no subject'}"
+        else:
+            text = f"{where}{len(fresh)} new messages, the latest from {who}"
+        self.say(text)
 
     def refresh(self):
         if not self.account:
@@ -1028,15 +1049,45 @@ class MainWindow(Gtk.ApplicationWindow):
         self.sync_current(announce_new=True)
 
     def _periodic_check(self):
+        """Check the folder you're in, and every account's Inbox in the background."""
+        current = None
         if self.account and self.folder:
+            current = (self.account.id, self.folder.path)
             self.sync_current(announce_new=True)
+        for acct in self.cfg.accounts:
+            sess = self.sessions.get(acct.id)
+            if not sess:
+                continue
+            inbox = next((f.path for f in sess.folders if f.special == "inbox"), "INBOX")
+            if (acct.id, inbox) == current:
+                continue
+            sess.submit(sess.sync_folder, inbox,
+                        on_done=lambda r, a=acct, p=inbox: self._background_synced(a, p, r))
         return GLib.SOURCE_CONTINUE
+
+    def _background_synced(self, acct: Account, path: str, result):
+        if result.changed and self.account and self.folder and \
+                (acct.id, path) == (self.account.id, self.folder.path):
+            self._populate(self.store.messages(acct.id, path))
+        self._notify_new(acct, result)
 
     def _set_conversations(self, on: bool):
         self.cfg.settings.conversations = on
         self.cfg.save()
         self._populate(self.messages)
         self.say("Conversations on" if on else "Conversations off")
+
+    def _set_new_mail_sound(self, on: bool):
+        self.cfg.settings.new_mail_sound = on
+        self.cfg.save()
+        if on:
+            sounds.play_new_mail()
+        self.say("New mail sound on" if on else "New mail sound off")
+
+    def _set_new_mail_announce(self, on: bool):
+        self.cfg.settings.new_mail_announce = on
+        self.cfg.save()
+        self.say("Announcing new mail" if on else "Not announcing new mail")
 
     def _set_prefer_html(self, on: bool):
         self.cfg.settings.prefer_html = on

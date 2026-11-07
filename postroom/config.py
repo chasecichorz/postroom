@@ -63,6 +63,8 @@ class Settings:
     prefer_html: bool = False        # read the HTML part (as text) instead of the plain part
     mark_read_on_open: bool = True   # mark a message read when you open it (Enter / reading pane)
     check_minutes: int = 2           # how often to check for new mail
+    new_mail_sound: bool = True      # play the chime when new mail arrives
+    new_mail_announce: bool = True   # say who it is from
     window_width: int = 1200
     window_height: int = 800
 

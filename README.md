@@ -55,6 +55,25 @@ registrations belong to Thunderbird, and Postroom must not borrow them. Put the 
 
 Until a provider has an entry, its accounts use app passwords.
 
+## New mail
+
+Every couple of minutes Postroom checks the folder you're in and every account's Inbox.
+New mail plays a short chime (Postroom's own sound, made by the app) and says who it is
+from, like "New mail from Ann Lee: Lunch on Friday?". The View menu turns the sound
+(Play a Sound for New Mail) and the announcement (Say Who New Mail Is From) on or off.
+
+## Address book
+
+Postroom learns addresses from your mail: people who write to you, and especially people
+you write to (it reads your Sent folder once to get started). Automated senders such as
+no-reply are left out. For Gmail accounts that use Sign in with browser, your Google
+contacts are brought in too, every few hours or right away with File, Update Contacts from
+Google. Postroom only reads your contacts and never changes them.
+
+In To and Cc, type two or more letters of a name or address. The best match is spoken,
+like "Ann Lee, ann@example.com, 1 of 3". Down and Up step through the matches, Enter or Tab
+adds one, and Escape dismisses the suggestions without closing the message.
+
 ## Layout
 
 | Pane | Get there with |
@@ -105,6 +124,8 @@ Ctrl+Enter or Alt+S send, and Escape to close (it asks before throwing away your
 ```sh
 python3 -m unittest tests.test_core                                # mail, cache, threading
 python3 -m unittest tests.test_accounts                            # finding servers, browser sign-in
+python3 -m unittest tests.test_contacts                            # address book, Google contacts
+xvfb-run -a dbus-run-session -- python3 -m tests.completion_probe  # what To suggestions say
 xvfb-run -a dbus-run-session -- python3 -m tests.ui_smoke          # the window, on a hidden screen
 xvfb-run -a dbus-run-session -- python3 -m tests.a11y_probe        # what a screen reader is told
 python3 -m tests.fake_app                                          # try it with a pretend account

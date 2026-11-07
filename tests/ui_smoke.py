@@ -16,14 +16,16 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from postroom import passwords, sending, session  # noqa: E402
+from postroom import passwords, sending, session, sounds  # noqa: E402
 from postroom.config import Account, Config  # noqa: E402
 from postroom.ui.common import focus_within  # noqa: E402
-from tests.fake_imap import FakeClient  # noqa: E402
+from tests.fake_imap import FakeClient, _raw  # noqa: E402
 
 session.ImapClient = FakeClient
 SENT = []
 sending.send = lambda account, pw, msg: SENT.append(msg)
+CHIMES = []
+sounds.play_new_mail = lambda: CHIMES.append(1) or True  # never play aloud in tests
 
 cfg = Config()
 acct = Account(name="Personal", email="me@gmail.com", full_name="Me")
@@ -281,6 +283,35 @@ def account_added(win):
     check("second account saved", names == ["Personal", "Work"], str(names))
     check("password saved", passwords.lookup(win.cfg.accounts[1].id) == "secret")
     check("new account selected", win.account.name == "Work")
+
+
+@step(800)
+def new_mail_arrives(win):
+    import time as _t
+    win.cfg.settings.new_mail_sound = win.cfg.settings.new_mail_announce = True
+    mb().add("INBOX", _raw(500, "Zed Ray <zed@example.com>", "Hello there", "Hi!", _t.time(), "t500"),
+             set(), "t500")
+    win._periodic_check()
+
+
+@step(1500)
+def new_mail_announced(win):
+    check("new mail chimes", len(CHIMES) >= 1, str(CHIMES))
+    text = win.status.get_text()
+    check("new mail says who and what", "New mail from Zed Ray: Hello there" in text, text)
+    check("names the account when there are several", text.startswith("In "), text)
+    CHIMES.clear()
+    win.cfg.settings.new_mail_sound = False
+    import time as _t
+    mb().add("INBOX", _raw(501, "Yve <yve@example.com>", "Second", "Hi again", _t.time(), "t501"),
+             set(), "t501")
+    win._periodic_check()
+
+
+@step(1500)
+def new_mail_sound_off(win):
+    check("no chime when the sound is off", CHIMES == [], str(CHIMES))
+    check("still announced", "New mail from Yve: Second" in win.status.get_text(), win.status.get_text())
 
 
 @step(1200)
