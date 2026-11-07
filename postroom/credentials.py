@@ -52,6 +52,9 @@ def issuer_and_client(account: Account) -> tuple[oauth2.Issuer, oauth2.Client]:
     issuer = oauth2.issuer_for(account.imap_host) or oauth2.issuer_for(account.email.rsplit("@", 1)[-1])
     if issuer is None:
         raise CredentialError(f"Browser sign-in isn't available for {account.imap_host}.")
+    if not issuer.browser_ok:
+        raise CredentialError(f"{issuer.name} doesn't allow browser sign-in from Postroom. "
+                              "Use an app password instead.")
     client = oauth2.client_for(issuer)
     if client is None:
         raise CredentialError(

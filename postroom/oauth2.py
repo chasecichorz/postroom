@@ -62,6 +62,9 @@ class Issuer:
     use_pkce: bool = True
     redirect: str = "http://127.0.0.1"
     extra_auth_params: tuple = ()
+    # Yahoo and AOL only accept an https://127.0.0.1 return, which Thunderbird catches in its
+    # built-in browser; a normal web browser can't hand that back to Postroom.
+    browser_ok: bool = True
 
 
 ISSUERS = {i.name: i for i in (
@@ -70,12 +73,13 @@ ISSUERS = {i.name: i for i in (
            extra_auth_params=(("access_type", "offline"), ("prompt", "consent"))),
     Issuer("login.microsoftonline.com",
            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-           "https://login.microsoftonline.com/common/oauth2/v2.0/token", MICROSOFT_SCOPES,
-           redirect="http://localhost"),
+           "https://login.microsoftonline.com/common/oauth2/v2.0/token", MICROSOFT_SCOPES),
     Issuer("login.yahoo.com", "https://api.login.yahoo.com/oauth2/request_auth",
-           "https://api.login.yahoo.com/oauth2/get_token", YAHOO_SCOPES),
+           "https://api.login.yahoo.com/oauth2/get_token", YAHOO_SCOPES,
+           redirect="https://127.0.0.1", browser_ok=False),
     Issuer("login.aol.com", "https://api.login.aol.com/oauth2/request_auth",
-           "https://api.login.aol.com/oauth2/get_token", YAHOO_SCOPES),
+           "https://api.login.aol.com/oauth2/get_token", YAHOO_SCOPES,
+           redirect="https://127.0.0.1", browser_ok=False),
     Issuer("www.fastmail.com", "https://api.fastmail.com/oauth/authorize",
            "https://api.fastmail.com/oauth/refresh", FASTMAIL_SCOPES,
            redirect="http://127.0.0.1/fastmail"),
