@@ -37,7 +37,11 @@ only your user can read (permissions 600). To use a keyring instead, install
 | Reading pane | Enter on a message |
 | Status bar | Ctrl+9 |
 
-F6 and Shift+F6 move through the panes in order. F1 lists every shortcut.
+Tab and Shift+Tab move through the panes the way QuickMail does: Accounts, Folders,
+Messages, then the reading pane (attachments, then the message), and wrap around. Arrow keys
+move within a pane. The menu bar (F10 or Alt) and the status bar (Ctrl+9) are not Tab stops;
+Escape on the menu bar returns to where you were. F6 and Shift+F6 move through all the panes,
+including the status bar. F1 lists every shortcut.
 
 The message list groups mail into conversations. Right expands a conversation, Left
 collapses it or goes back to the conversation. Turn grouping off in the View menu. Type

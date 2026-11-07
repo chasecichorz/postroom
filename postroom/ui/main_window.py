@@ -227,6 +227,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.status = Gtk.Label(xalign=0, selectable=True)
         self.status.add_css_class("statusbar")
         set_label(self.status, "Status")
+        # Like QuickMail, the status bar is reached with Ctrl+9 or F6, not Tab: it only takes
+        # focus while you are on it.
+        self.status.set_focusable(False)
+        leave = Gtk.EventControllerFocus()
+        leave.connect("leave", lambda *_: self.status.set_focusable(False))
+        self.status.add_controller(leave)
         outer.append(self.status)
 
     @staticmethod
@@ -260,7 +266,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "prev-unread": lambda: self.jump_unread(-1), "links": self.show_links,
             "next-pane": lambda: self.cycle_pane(1), "prev-pane": lambda: self.cycle_pane(-1),
             "focus-accounts": self.focus_accounts, "focus-folders": self.focus_folders,
-            "focus-messages": self.focus_messages, "focus-status": lambda: self.status.grab_focus(),
+            "focus-messages": self.focus_messages, "focus-status": self.focus_status,
             "focus-attachments": self.focus_attachments, "go-inbox": self.go_inbox,
             "add-account": self.add_account,
             "edit-account": self.edit_account, "remove-account": self.remove_account,
@@ -288,6 +294,56 @@ class MainWindow(Gtk.ApplicationWindow):
             sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trigger),
                                              Gtk.NamedAction.new(action)))
         self.add_controller(sc)
+
+        # GTK 4 stops at the last control instead of wrapping; wrap like QuickMail does.
+        tab = Gtk.EventControllerKey()
+        tab.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        tab.connect("key-pressed", self._tab_key)
+        self.add_controller(tab)
+
+        # Escape on the menu bar (with no menu open) goes back to where you were.
+        self._last_focus = None
+        self.connect("notify::focus-widget", self._track_focus)
+        esc = Gtk.EventControllerKey()
+        esc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        esc.connect("key-pressed", self._menubar_escape)
+        self.add_controller(esc)
+
+    def _track_focus(self, *_):
+        w = self.get_focus()
+        if w is not None and not focus_within(self, self.menubar):
+            self._last_focus = w
+
+    def _menubar_escape(self, _c, keyval, _code, state):
+        if keyval != Gdk.KEY_Escape or mods(state) or not focus_within(self, self.menubar):
+            return False
+        child = self.menubar.get_first_child()
+        while child is not None:
+            pop = child.get_first_child()
+            while pop is not None:
+                if isinstance(pop, Gtk.Popover) and pop.get_mapped():
+                    return False  # let GTK close the open menu first
+                pop = pop.get_next_sibling()
+            child = child.get_next_sibling()
+        w = self._last_focus
+        if w is not None and w.get_root() is self and w.is_visible() and w.grab_focus():
+            return True
+        self.focus_messages()
+        return True
+
+    def _tab_key(self, _c, keyval, _code, state):
+        if keyval not in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab):
+            return False
+        if mods(state) & ~Gdk.ModifierType.SHIFT_MASK:
+            return False
+        back = keyval == Gdk.KEY_ISO_Left_Tab or bool(state & Gdk.ModifierType.SHIFT_MASK)
+        before = self.get_focus()
+        moved = self.child_focus(Gtk.DirectionType.TAB_BACKWARD if back else Gtk.DirectionType.TAB_FORWARD)
+        # The menu bar is reached with F10 or Alt, not Tab (as in QuickMail).
+        now = self.get_focus()
+        if not moved or now is None or now is before or focus_within(self, self.menubar):
+            (self.focus_reading if back else self.focus_accounts)()
+        return True
 
     # ===== accounts =========================================================================
     def _reload_accounts(self, select_id: str | None = None):
@@ -744,9 +800,14 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             announce(self, "No attachments")
 
+    def focus_status(self):
+        self.status.set_focusable(True)
+        self.status.grab_focus()
+
     def cycle_pane(self, step: int):
         panes = [(self.account_list, self.focus_accounts), (self.folder_view, self.focus_folders),
-                 (self.msg_stack, self.focus_messages), (self.reading_pane, self.focus_reading)]
+                 (self.msg_stack, self.focus_messages), (self.reading_pane, self.focus_reading),
+                 (self.status, self.focus_status)]
         cur = next((i for i, (w, _) in enumerate(panes) if focus_within(self, w)), -1)
         panes[(cur + step) % len(panes)][1]()
 
