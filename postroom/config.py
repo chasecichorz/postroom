@@ -7,8 +7,8 @@ import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-APP_ID = "io.github.mailpane.Mailpane"
-APP_NAME = "Mailpane"
+APP_ID = "io.github.postroom.Postroom"
+APP_NAME = "Postroom"
 
 
 def _xdg(var: str, default: str) -> Path:
@@ -16,17 +16,17 @@ def _xdg(var: str, default: str) -> Path:
 
 
 def config_dir() -> Path:
-    override = os.environ.get("MAILPANE_PROFILE")
+    override = os.environ.get("POSTROOM_PROFILE")
     if override:
         return Path(override) / "config"
-    return _xdg("XDG_CONFIG_HOME", ".config") / "mailpane"
+    return _xdg("XDG_CONFIG_HOME", ".config") / "postroom"
 
 
 def cache_dir() -> Path:
-    override = os.environ.get("MAILPANE_PROFILE")
+    override = os.environ.get("POSTROOM_PROFILE")
     if override:
         return Path(override) / "cache"
-    return _xdg("XDG_CACHE_HOME", ".cache") / "mailpane"
+    return _xdg("XDG_CACHE_HOME", ".cache") / "postroom"
 
 
 @dataclass

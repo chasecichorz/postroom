@@ -4,8 +4,8 @@ from __future__ import annotations
 import time
 from email.message import EmailMessage
 
-from mailpane.imap import ImapError, parse_header_block
-from mailpane.models import Folder
+from postroom.imap import ImapError, parse_header_block
+from postroom.models import Folder
 
 FOLDERS = [
     Folder("INBOX", "Inbox", "/", frozenset({"\\hasnochildren"}), "inbox"),

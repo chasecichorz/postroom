@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 # -- list items ------------------------------------------------------------------------------
 class FolderItem(GObject.Object):
-    __gtype_name__ = "MailpaneFolderItem"
+    __gtype_name__ = "PostroomFolderItem"
     revision = GObject.Property(type=int, default=0)
 
     def __init__(self, node: FolderNode):
@@ -35,7 +35,7 @@ class FolderItem(GObject.Object):
 
 class RowItem(GObject.Object):
     """A message-list row: a whole conversation, or one message (top level or inside one)."""
-    __gtype_name__ = "MailpaneRowItem"
+    __gtype_name__ = "PostroomRowItem"
     revision = GObject.Property(type=int, default=0)
 
     def __init__(self, messages: list[Message], is_child: bool = False):

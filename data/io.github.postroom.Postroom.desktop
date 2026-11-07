@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Mailpane
+Name=Postroom
 Comment=Keyboard-first email, laid out like QuickMail
-Exec=mailpane
+Exec=postroom
 Icon=mail-unread
 Terminal=false
 Categories=Network;Email;

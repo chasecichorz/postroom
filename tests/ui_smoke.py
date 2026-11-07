@@ -7,8 +7,8 @@ import sys
 import tempfile
 import traceback
 
-os.environ["MAILPANE_PROFILE"] = tempfile.mkdtemp()
-os.environ["MAILPANE_NO_KEYRING"] = "1"
+os.environ["POSTROOM_PROFILE"] = tempfile.mkdtemp()
+os.environ["POSTROOM_NO_KEYRING"] = "1"
 os.environ.setdefault("GTK_A11Y", "atspi")
 
 import gi  # noqa: E402
@@ -16,9 +16,9 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from mailpane import passwords, sending, session  # noqa: E402
-from mailpane.config import Account, Config  # noqa: E402
-from mailpane.ui.common import focus_within  # noqa: E402
+from postroom import passwords, sending, session  # noqa: E402
+from postroom.config import Account, Config  # noqa: E402
+from postroom.ui.common import focus_within  # noqa: E402
 from tests.fake_imap import FakeClient  # noqa: E402
 
 session.ImapClient = FakeClient
@@ -31,7 +31,7 @@ cfg.accounts.append(acct)
 cfg.save()
 passwords.store(acct.id, "x", "secret")
 
-from mailpane.app import MailpaneApp  # noqa: E402
+from postroom.app import PostroomApp  # noqa: E402
 
 failures, errors = [], []
 _hook = sys.excepthook
@@ -51,7 +51,7 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-app = MailpaneApp()
+app = PostroomApp()
 mb = lambda: FakeClient.mailbox  # noqa: E731
 
 

@@ -1,4 +1,4 @@
-# Mailpane
+# Postroom
 
 A keyboard-first Linux email client laid out like Kelly Ford's
 [QuickMail](https://github.com/kellylford/QuickMail): accounts and folders on the left,
@@ -8,7 +8,7 @@ Built with GTK 4 and Python, and designed for use with the Orca screen reader.
 ## Running it
 
 ```sh
-./bin/mailpane
+./bin/postroom
 ```
 
 It needs Python 3, GTK 4, PyGObject and libsecret, which are all standard on Arch
@@ -23,7 +23,7 @@ The first time it starts, the Add Account window opens. For Gmail:
 ### Where your password is kept
 
 If a keyring is running (GNOME Keyring, KWallet, KeePassXC), the app password is stored
-there. If not, which is usual on i3, it goes in `~/.config/mailpane/passwords.json`, which
+there. If not, which is usual on i3, it goes in `~/.config/postroom/passwords.json`, which
 only your user can read (permissions 600). To use a keyring instead, install
 `gnome-keyring`, start it with your session, and add the account again.
 
@@ -79,6 +79,6 @@ python3 -m tests.fake_app                                          # try it with
 
 ## Files
 
-- `~/.config/mailpane/config.json`: accounts and settings
-- `~/.cache/mailpane/cache.db`: local copy of the newest 1000 messages per folder, for speed
-- `~/.cache/mailpane/mailpane.log`: log, useful when something goes wrong
+- `~/.config/postroom/config.json`: accounts and settings
+- `~/.cache/postroom/cache.db`: local copy of the newest 1000 messages per folder, for speed
+- `~/.cache/postroom/postroom.log`: log, useful when something goes wrong

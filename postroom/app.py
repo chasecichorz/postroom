@@ -58,7 +58,7 @@ MESSAGE_SECTIONS = [
 ]
 
 
-class MailpaneApp(Gtk.Application):
+class PostroomApp(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.window = None
@@ -114,6 +114,6 @@ class MailpaneApp(Gtk.Application):
 def main(argv=None) -> int:
     log_dir = cache_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(filename=log_dir / "mailpane.log", level=logging.INFO,
+    logging.basicConfig(filename=log_dir / "postroom.log", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    return MailpaneApp().run(argv if argv is not None else sys.argv)
+    return PostroomApp().run(argv if argv is not None else sys.argv)

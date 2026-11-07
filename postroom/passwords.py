@@ -16,7 +16,7 @@ try:
     gi.require_version("Secret", "1")
     from gi.repository import GLib, Secret
     _SCHEMA = Secret.Schema.new(
-        "io.github.mailpane.Password", Secret.SchemaFlags.NONE,
+        "io.github.postroom.Password", Secret.SchemaFlags.NONE,
         {"account_id": Secret.SchemaAttributeType.STRING})
 except (ImportError, ValueError):  # pragma: no cover - libsecret missing
     Secret = None
@@ -45,7 +45,7 @@ def _write_file(data: dict) -> None:
 
 
 def _keyring_available() -> bool:
-    if Secret is None or os.environ.get("MAILPANE_NO_KEYRING"):
+    if Secret is None or os.environ.get("POSTROOM_NO_KEYRING"):
         return False
     try:
         Secret.Service.get_sync(Secret.ServiceFlags.NONE, None)

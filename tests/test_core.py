@@ -3,13 +3,13 @@ import tempfile
 import time
 import unittest
 
-os.environ["MAILPANE_PROFILE"] = tempfile.mkdtemp()
-os.environ["MAILPANE_NO_KEYRING"] = "1"
+os.environ["POSTROOM_PROFILE"] = tempfile.mkdtemp()
+os.environ["POSTROOM_NO_KEYRING"] = "1"
 
-from mailpane import folder_tree, imap, mime, passwords, sending, threads, utf7  # noqa: E402
-from mailpane.config import Account, Config  # noqa: E402
-from mailpane.models import Message  # noqa: E402
-from mailpane.store import Store  # noqa: E402
+from postroom import folder_tree, imap, mime, passwords, sending, threads, utf7  # noqa: E402
+from postroom.config import Account, Config  # noqa: E402
+from postroom.models import Message  # noqa: E402
+from postroom.store import Store  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 

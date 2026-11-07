@@ -70,8 +70,8 @@ def label_menu_items(widget: Gtk.Widget) -> None:
     each time a menu opens.
     """
     for w in _walk(widget):
-        if isinstance(w, Gtk.Popover) and not getattr(w, "_mailpane_labels", False):
-            w._mailpane_labels = True
+        if isinstance(w, Gtk.Popover) and not getattr(w, "_postroom_labels", False):
+            w._postroom_labels = True
             w.connect("map", _name_items)
             _name_items(w)
 

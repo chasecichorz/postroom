@@ -142,6 +142,6 @@ class AccountDialog(Gtk.Window):
             hint = " Make sure you used an app password." if acct.is_gmail and "fail" in err.lower() else ""
             self._show_error(err + hint, self.password)
             return
-        passwords.store(acct.id, f"Mailpane: {acct.email}", pw)
+        passwords.store(acct.id, f"Postroom: {acct.email}", pw)
         self.on_saved(acct, self.account is None)
         self.destroy()
