@@ -9,7 +9,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, Gtk  # noqa: E402
 
-from .config import APP_ID, APP_NAME, Config, cache_dir  # noqa: E402
+from .config import APP_ID, APP_NAME, Config, cache_dir, config_dir  # noqa: E402
 from .store import Store  # noqa: E402
 from .ui.common import install_css  # noqa: E402
 
@@ -112,8 +112,11 @@ class PostroomApp(Gtk.Application):
 
 
 def main(argv=None) -> int:
+    # Mail, passwords and logs are private: only this user may open these folders.
+    for d in (config_dir(), cache_dir()):
+        d.mkdir(parents=True, exist_ok=True)
+        d.chmod(0o700)
     log_dir = cache_dir()
-    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=log_dir / "postroom.log", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     return PostroomApp().run(argv if argv is not None else sys.argv)
