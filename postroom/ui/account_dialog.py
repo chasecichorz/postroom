@@ -6,14 +6,18 @@ from dataclasses import replace
 
 from gi.repository import Gdk, GLib, Gtk
 
-from .. import passwords
+from .. import autoconfig, credentials, oauth2, passwords
 from ..config import Account
 from ..imap import ImapError
 from ..session import check_login
 from .common import announce, set_description, set_label, standalone_window
 
 GMAIL_HELP = ("For Gmail, use an app password, not your normal password. Create one at "
-              "myaccount.google.com/apppasswords. Two-step verification has to be turned on.")
+              "myaccount.google.com/apppasswords. Two-step verification has to be turned on. "
+              "Or use Sign in with browser.")
+GMAIL = autoconfig.ServerConfig(
+    autoconfig.Server("imap.gmail.com", 993, autoconfig.SSL, auth=["oauth2", "password"]),
+    autoconfig.Server("smtp.gmail.com", 465, autoconfig.SSL), "Gmail", "built-in")
 
 
 class AccountDialog(Gtk.Window):
@@ -51,13 +55,21 @@ class AccountDialog(Gtk.Window):
         set_description(self.show_pw, "Shows the password as ordinary text so you can check "
                         "it. Your screen reader will read it aloud.")
         self.show_pw.connect("toggled", self._toggle_password)
-        grid.attach(self.show_pw, 1, 4, 1, 1)
+        row = Gtk.Box(spacing=12)
+        row.append(self.show_pw)
+        self.browser_btn = Gtk.Button(label="Sign in with _browser", use_underline=True)
+        set_description(self.browser_btn, "Opens your email provider's sign-in page in your "
+                        "web browser, instead of using an app password.")
+        self.browser_btn.connect("clicked", self._browser_sign_in)
+        row.append(self.browser_btn)
+        grid.attach(row, 1, 4, 1, 1)
+        self._signin = None
 
         help_label = Gtk.Label(label=GMAIL_HELP, wrap=True, xalign=0, max_width_chars=60)
         help_label.add_css_class("dim")
         grid.attach(help_label, 0, 5, 2, 1)
 
-        exp = Gtk.Expander(label="_Server settings (only for providers other than Gmail)",
+        exp = Gtk.Expander(label="_Server settings (found for you; change only if needed)",
                            use_underline=True)
         sgrid = Gtk.Grid(column_spacing=12, row_spacing=8, margin_top=8)
         exp.set_child(sgrid)
@@ -94,6 +106,12 @@ class AccountDialog(Gtk.Window):
         self.imap_port.set_text(str(a.imap_port))
         self.smtp_host.set_text(a.smtp_host)
         self.smtp_port.set_text(str(a.smtp_port))
+        # Server settings are looked up from the address unless you change them yourself.
+        self._filling = False
+        self._servers_edited = account is not None
+        for e in (self.imap_host, self.imap_port, self.smtp_host, self.smtp_port):
+            e.connect("changed", self._server_changed)
+        self.connect("close-request", lambda *_: (self._signin and self._signin.cancel(), False)[1])
 
         kc = Gtk.EventControllerKey()
         kc.connect("key-pressed", lambda _c, kv, _k, _s: (self.close(), True)[1]
@@ -150,47 +168,161 @@ class AccountDialog(Gtk.Window):
         if focus:
             focus.grab_focus()
 
-    def _save(self, *_):
-        email = self.email.get_text().strip()
-        pw = self._password_text().replace(" ", "").strip()
-        if "@" not in email:
-            return self._show_error("Enter your full email address.", self.email)
-        if not pw and not self.account:
-            return self._show_error("Enter the app password.", self._password_widget())
+    def _server_changed(self, *_):
+        if not self._filling:
+            self._servers_edited = True
+
+    def _fill_servers(self, cfg: autoconfig.ServerConfig):
+        self._filling = True
+        self.imap_host.set_text(cfg.incoming.hostname)
+        self.imap_port.set_text(str(cfg.incoming.port))
+        self.smtp_host.set_text(cfg.outgoing.hostname)
+        self.smtp_port.set_text(str(cfg.outgoing.port))
+        self._filling = False
+
+    def _account_from_fields(self, email: str, auth: str) -> Account | str:
+        """The account as typed, or an error message."""
         try:
             imap_port, smtp_port = int(self.imap_port.get_text()), int(self.smtp_port.get_text())
         except ValueError:
-            return self._show_error("The port numbers must be numbers.", self.imap_port)
+            return "The port numbers must be numbers."
         base = self.account or Account(name="", email="")
-        acct = replace(base, name=self.name.get_text().strip() or email,
+        return replace(base, name=self.name.get_text().strip() or email,
                        full_name=self.full_name.get_text().strip(), email=email,
                        imap_host=self.imap_host.get_text().strip() or "imap.gmail.com",
                        imap_port=imap_port,
+                       imap_security="starttls" if imap_port == 143 else "ssl",
                        smtp_host=self.smtp_host.get_text().strip() or "smtp.gmail.com",
-                       smtp_port=smtp_port)
-        if not pw:
-            pw = passwords.lookup(acct.id) or ""
-        self.save_btn.set_sensitive(False)
-        self.error.set_visible(False)
-        announce(self, "Checking the account, please wait")
+                       smtp_port=smtp_port, smtp_security="", auth=auth)
 
-        def work():
+    def _find_servers(self, email: str) -> autoconfig.ServerConfig | None:
+        """Look the servers up (worker thread). None means keep what is in the fields."""
+        if self._servers_edited:
+            return None
+        if email.lower().endswith(("@gmail.com", "@googlemail.com")):
+            return GMAIL
+        return autoconfig.find_config(email)
+
+    def _busy(self, busy: bool):
+        self.save_btn.set_sensitive(not busy)
+        self.browser_btn.set_sensitive(not busy)
+
+    def _start(self, email: str, auth: str, work):
+        """Find servers, then run work(acct) on a worker thread; it returns an error or None."""
+        self._busy(True)
+        self.error.set_visible(False)
+
+        def run():
             try:
-                check_login(acct, pw)
-                err = None
-            except ImapError as e:
+                cfg = self._find_servers(email)
+            except (LookupError, ValueError) as e:
+                msg = (f"Postroom couldn't find the mail servers for this address ({e}). "
+                       "Open Server settings and enter them.")
+                GLib.idle_add(lambda: self._failed(msg, self.email) and False)
+                return
+            if cfg is not None:
+                done = threading.Event()
+
+                def fill():
+                    self._fill_servers(cfg)
+                    done.set()
+                    return False
+                GLib.idle_add(fill)
+                done.wait()
+            holder = {}
+
+            def make():
+                holder["acct"] = self._account_from_fields(email, auth)
+                done2.set()
+                return False
+            done2 = threading.Event()
+            GLib.idle_add(make)
+            done2.wait()
+            acct = holder["acct"]
+            if isinstance(acct, str):
+                GLib.idle_add(lambda: self._failed(acct, self.imap_port) and False)
+                return
+            try:
+                work(acct)
+            except (ImapError, credentials.CredentialError, oauth2.OAuthError) as e:
                 err = str(e)
+                GLib.idle_add(lambda: self._failed(err, self._password_widget()) and False)
             except Exception as e:  # noqa: BLE001
                 err = f"Something went wrong: {e}"
-            GLib.idle_add(lambda: self._checked(acct, pw, err) and False)
-        threading.Thread(target=work, daemon=True).start()
+                GLib.idle_add(lambda: self._failed(err, self._password_widget()) and False)
+        threading.Thread(target=run, daemon=True).start()
 
-    def _checked(self, acct: Account, pw: str, err: str | None):
-        self.save_btn.set_sensitive(True)
-        if err:
-            hint = " Make sure you used an app password." if acct.is_gmail and "fail" in err.lower() else ""
-            self._show_error(err + hint, self._password_widget())
-            return
-        passwords.store(acct.id, f"Postroom: {acct.email}", pw)
+    def _failed(self, msg: str, focus=None):
+        self._busy(False)
+        self._signin = None
+        self._show_error(msg, focus)
+
+    def _done(self, acct: Account):
         self.on_saved(acct, self.account is None)
         self.destroy()
+
+    def _email(self) -> str | None:
+        email = self.email.get_text().strip()
+        if "@" not in email:
+            self._show_error("Enter your full email address.", self.email)
+            return None
+        return email
+
+    def _save(self, *_):
+        email = self._email()
+        if email is None:
+            return
+        pw = self._password_text().replace(" ", "").strip()
+        keep_oauth = (not pw and self.account is not None and self.account.auth == "oauth2")
+        if not pw and not self.account:
+            return self._show_error("Enter the app password, or use Sign in with browser.",
+                                    self._password_widget())
+        announce(self, "Checking the account, please wait")
+
+        def work(acct: Account):
+            secret = pw
+            if keep_oauth:
+                secret = credentials.secret(acct)
+            elif not secret:
+                secret = passwords.lookup(acct.id) or ""
+            try:
+                check_login(acct, secret)
+            except ImapError as e:
+                hint = (" Make sure you used an app password." if acct.is_gmail and not keep_oauth
+                        and "fail" in str(e).lower() else "")
+                raise ImapError(str(e) + hint) from e
+            if not keep_oauth:
+                passwords.store(acct.id, f"Postroom: {acct.email}", secret)
+            GLib.idle_add(lambda: self._done(acct) and False)
+        self._start(email, "oauth2" if keep_oauth else "password", work)
+
+    def _browser_sign_in(self, *_):
+        email = self._email()
+        if email is None:
+            return
+        announce(self, "Finding your provider's sign-in page, please wait")
+
+        def work(acct: Account):
+            issuer, client = credentials.issuer_and_client(acct)
+            self._signin = signin = oauth2.SignIn(issuer, client, login_hint=acct.email)
+            url = signin.start()
+            GLib.idle_add(lambda: self._open_browser(url) and False)
+            tokens = signin.wait()
+            GLib.idle_add(lambda: announce(self, "Signed in. Checking the account, please wait")
+                          and False)
+            check_login(acct, tokens.access_token)
+            credentials.save_oauth(acct, tokens)
+            GLib.idle_add(lambda: self._done(acct) and False)
+        self._start(email, "oauth2", work)
+
+    def _open_browser(self, url: str):
+        def finished(launcher, res):
+            try:
+                launcher.launch_finish(res)
+            except GLib.Error as e:
+                if self._signin:
+                    self._signin.cancel()
+                self._failed(f"Couldn't open your web browser: {e.message}")
+        Gtk.UriLauncher(uri=url).launch(self, None, finished)
+        announce(self, "Your web browser is opening your provider's sign-in page. Sign in "
+                 "there, then come back to Postroom. Press Escape here to cancel.", important=True)

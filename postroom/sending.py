@@ -111,17 +111,30 @@ def build(account: Account, draft: Draft) -> EmailMessage:
 
 
 def send(account: Account, password: str, msg: EmailMessage) -> None:
+    """Send `msg`. `password` is the app password, or the access token for a browser
+    sign-in account."""
     ctx = ssl.create_default_context()
     try:
-        if account.smtp_port == 465:
+        if account.smtp_uses_ssl:
             server = smtplib.SMTP_SSL(account.smtp_host, account.smtp_port, context=ctx, timeout=60)
         else:
             server = smtplib.SMTP(account.smtp_host, account.smtp_port, timeout=60)
             server.starttls(context=ctx)
         with server:
-            server.login(account.login, password)
+            if account.auth == "oauth2":
+                from .oauth2 import xoauth2
+                server.ehlo()
+                server.auth("XOAUTH2", lambda challenge=None: xoauth2(account.login, password),
+                            initial_response_ok=True)
+            else:
+                server.login(account.login, password)
             server.send_message(msg)
     except smtplib.SMTPAuthenticationError as e:
+        if account.auth == "oauth2":
+            from .credentials import invalidate
+            invalidate(account)
+            raise SendError("The mail server refused the sign-in. Try sending again; if it "
+                            "keeps failing, sign in again in Edit Account.") from e
         raise SendError("Sign-in to the mail server failed. Check the app password.") from e
     except smtplib.SMTPRecipientsRefused as e:
         raise SendError("The server refused these recipients: " + ", ".join(e.recipients)) from e

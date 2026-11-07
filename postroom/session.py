@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from gi.repository import GLib
 
-from . import passwords, sending
+from . import credentials, passwords, sending
 from .config import Account
 from .imap import NETWORK_ERRORS, ImapClient, ImapError
 from .models import Folder, Message
@@ -69,10 +69,7 @@ class AccountSession:
     # -- runs on the worker thread ----------------------------------------------------------
     def _client(self) -> ImapClient:
         if self.client is None:
-            pw = passwords.lookup(self.account.id)
-            if not pw:
-                raise ImapError("No password is saved for this account.")
-            self.client = ImapClient(self.account, pw)
+            self.client = ImapClient(self.account, lambda: credentials.secret(self.account))
         return self.client
 
     def _run(self, op):
@@ -147,9 +144,10 @@ class AccountSession:
         self.store.delete(self.account.id, path, uids)
 
     def send(self, draft: sending.Draft) -> None:
-        pw = passwords.lookup(self.account.id)
-        if not pw:
-            raise sending.SendError("No password is saved for this account.")
+        try:
+            pw = credentials.secret(self.account)
+        except credentials.CredentialError as e:
+            raise sending.SendError(str(e)) from e
         msg = sending.build(self.account, draft)
         sending.send(self.account, pw, msg)
         # Gmail files sent mail by itself; other servers need a copy in Sent.

@@ -159,9 +159,11 @@ def parse_header_block(account_id: str, folder: str, meta: bytes, header: bytes)
 
 
 class ImapClient:
-    def __init__(self, account: Account, password: str):
+    def __init__(self, account: Account, secret):
+        """`secret` is the password or access token, or a function returning it (so a
+        reconnect an hour later gets a fresh browser sign-in token)."""
         self.account = account
-        self.password = password
+        self._secret = secret if callable(secret) else (lambda: secret)
         self.conn: imaplib.IMAP4_SSL | None = None
         self.caps: set[str] = set()
         self.selected: str | None = None
@@ -170,13 +172,30 @@ class ImapClient:
     def connect(self) -> None:
         try:
             ctx = ssl.create_default_context()
-            conn = imaplib.IMAP4_SSL(self.account.imap_host, self.account.imap_port,
-                                     ssl_context=ctx, timeout=30)
-        except (OSError, ssl.SSLError) as e:
+            if self.account.imap_security == "starttls":
+                conn = imaplib.IMAP4(self.account.imap_host, self.account.imap_port, timeout=30)
+                conn.starttls(ssl_context=ctx)
+            else:
+                conn = imaplib.IMAP4_SSL(self.account.imap_host, self.account.imap_port,
+                                         ssl_context=ctx, timeout=30)
+        except (OSError, ssl.SSLError, imaplib.IMAP4.error) as e:
             raise ImapError(f"Could not reach {self.account.imap_host}: {e}") from e
         try:
-            conn.login(self.account.login, self.password)
+            from .credentials import CredentialError
+            try:
+                secret = self._secret()
+            except CredentialError as e:
+                conn.logout()
+                raise ImapError(str(e)) from e
+            if self.account.auth == "oauth2":
+                from .oauth2 import xoauth2
+                conn.authenticate("XOAUTH2", lambda _: xoauth2(self.account.login, secret).encode())
+            else:
+                conn.login(self.account.login, secret)
         except imaplib.IMAP4.error as e:
+            if self.account.auth == "oauth2":
+                from .credentials import invalidate
+                invalidate(self.account)
             try:
                 conn.logout()
             except Exception:  # noqa: BLE001

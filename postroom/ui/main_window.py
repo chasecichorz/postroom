@@ -6,7 +6,7 @@ import time
 
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
-from .. import folder_tree, mime, passwords, threads
+from .. import credentials, folder_tree, mime, passwords, threads
 from ..config import APP_NAME, Account
 from ..folder_tree import FolderNode
 from ..models import Folder, Message
@@ -1071,7 +1071,7 @@ class MainWindow(Gtk.ApplicationWindow):
         def go():
             self.cfg.accounts = [a for a in self.cfg.accounts if a.id != acct.id]
             self.cfg.save()
-            passwords.delete(acct.id)
+            credentials.forget(acct)
             self.store.forget_account(acct.id)
             self.account = None
             self.folder = None

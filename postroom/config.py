@@ -39,11 +39,18 @@ class Account:
     imap_port: int = 993
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
+    imap_security: str = "ssl"     # "ssl" (TLS from the start) or "starttls"
+    smtp_security: str = ""        # "ssl" or "starttls"; empty means by port (465 is ssl)
+    auth: str = "password"         # "password" (app password) or "oauth2" (browser sign-in)
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def login(self) -> str:
         return self.username or self.email
+
+    @property
+    def smtp_uses_ssl(self) -> bool:
+        return self.smtp_security == "ssl" if self.smtp_security else self.smtp_port == 465
 
     @property
     def is_gmail(self) -> bool:

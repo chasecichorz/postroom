@@ -27,6 +27,34 @@ there. If not, which is usual on i3, it goes in `~/.config/postroom/passwords.js
 only your user can read (permissions 600). To use a keyring instead, install
 `gnome-keyring`, start it with your session, and add the account again.
 
+## Adding an account
+
+Type your email address. Postroom finds the server settings for you, the way Thunderbird
+does: it asks your provider first, then Thunderbird's public provider database, then the
+provider behind your domain's mail (MX) record, and last it tries the usual server names.
+It uses HTTPS only and sends just your domain, never your address. You only need Server
+settings if all of that fails.
+
+Then either:
+
+- **App password**: type or paste it. Postroom says how many characters the field holds,
+  and Alt+W shows it if you want to check it.
+- **Sign in with browser** (Alt+B): Postroom opens your provider's sign-in page in your web
+  browser. You sign in there, the browser hands Postroom a one-time code on 127.0.0.1, and
+  Postroom keeps a refresh token in place of a password. Works for Gmail, Outlook and
+  Microsoft 365, Yahoo, AOL and Fastmail.
+
+Browser sign-in needs Postroom's own registration with each provider. Mozilla's
+registrations belong to Thunderbird, and Postroom must not borrow them. Put the client IDs in
+`~/.config/postroom/oauth-clients.json`:
+
+```json
+{"accounts.google.com": {"client_id": "….apps.googleusercontent.com", "client_secret": "…"},
+ "login.microsoftonline.com": {"client_id": "…"}}
+```
+
+Until a provider has an entry, its accounts use app passwords.
+
 ## Layout
 
 | Pane | Get there with |
@@ -76,6 +104,7 @@ Ctrl+Enter or Alt+S send, and Escape to close (it asks before throwing away your
 
 ```sh
 python3 -m unittest tests.test_core                                # mail, cache, threading
+python3 -m unittest tests.test_accounts                            # finding servers, browser sign-in
 xvfb-run -a dbus-run-session -- python3 -m tests.ui_smoke          # the window, on a hidden screen
 xvfb-run -a dbus-run-session -- python3 -m tests.a11y_probe        # what a screen reader is told
 python3 -m tests.fake_app                                          # try it with a pretend account
@@ -86,3 +115,10 @@ python3 -m tests.fake_app                                          # try it with
 - `~/.config/postroom/config.json`: accounts and settings
 - `~/.cache/postroom/cache.db`: local copy of the newest 1000 messages per folder, for speed
 - `~/.cache/postroom/postroom.log`: log, useful when something goes wrong
+
+## Licenses
+
+`postroom/autoconfig.py` and `postroom/oauth2.py` are ported from Thunderbird's account
+setup and OAuth code and stay under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/),
+as that license requires. Thunderbird's source is at
+<https://github.com/thunderbird/thunderbird-desktop>.
