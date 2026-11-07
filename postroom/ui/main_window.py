@@ -155,7 +155,8 @@ class MainWindow(Gtk.ApplicationWindow):
         f.connect("setup", lambda _f, li: self._setup_row(li, FolderRow()))
         f.connect("bind", self._bind_folder)
         f.connect("unbind", self._unbind)
-        self.folder_view = Gtk.ListView(model=self.folder_sel, factory=f)
+        self.folder_view = Gtk.ListView(model=self.folder_sel, factory=f,
+                                    tab_behavior=Gtk.ListTabBehavior.ITEM)
         set_label(self.folder_view, "Folders")
         self.folder_typeahead = TypeAhead(self.folder_view, self.folder_sel,
                                           lambda row: row.get_item().node.name)
@@ -174,7 +175,8 @@ class MainWindow(Gtk.ApplicationWindow):
         f.connect("setup", lambda _f, li: self._setup_row(li, MessageRow()))
         f.connect("bind", self._bind_message)
         f.connect("unbind", self._unbind)
-        self.msg_view = Gtk.ListView(model=self.msg_sel, factory=f)
+        self.msg_view = Gtk.ListView(model=self.msg_sel, factory=f,
+                                    tab_behavior=Gtk.ListTabBehavior.ITEM)
         set_label(self.msg_view, "Messages")
         self.msg_view.connect("activate", lambda *_: self.focus_reading())
         self.msg_typeahead = TypeAhead(self.msg_view, self.msg_sel,
