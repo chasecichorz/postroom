@@ -6,6 +6,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from .contacts import GOOGLE, Contact
 from .models import Folder, Message
 
 _SCHEMA = """
@@ -20,6 +21,9 @@ CREATE TABLE IF NOT EXISTS folder_state(
 CREATE TABLE IF NOT EXISTS folder_list(account TEXT PRIMARY KEY, data TEXT);
 CREATE TABLE IF NOT EXISTS bodies(
     account TEXT, folder TEXT, uid INTEGER, raw BLOB, PRIMARY KEY(account, folder, uid));
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS contacts(
+    email TEXT PRIMARY KEY, name TEXT, source TEXT, score INTEGER, last_ts REAL);
 """
 
 _COLS = ("account, folder, uid, subject, from_name, from_addr, to_, cc, date_ts, flags, size, "
@@ -144,6 +148,62 @@ class Store:
             self.db.execute("DELETE FROM bodies WHERE rowid NOT IN "
                             "(SELECT rowid FROM bodies ORDER BY rowid DESC LIMIT ?)",
                             (BODY_CACHE_LIMIT,))
+
+    # -- address book -----------------------------------------------------------------------
+    def add_contacts(self, contacts: list[Contact]) -> None:
+        """Merge in contacts: scores add up, and a Google contact's name wins."""
+        if not contacts:
+            return
+        with self.lock, self.db:
+            for c in contacts:
+                row = self.db.execute("SELECT name, source, score, last_ts FROM contacts WHERE email=?",
+                                      (c.email,)).fetchone()
+                if row is None:
+                    self.db.execute("INSERT INTO contacts VALUES (?, ?, ?, ?, ?)",
+                                    (c.email, c.name, c.source, c.score, c.last_ts))
+                    continue
+                name, source, score, last = row
+                if c.source == GOOGLE:
+                    if source != GOOGLE:  # the Google boost is added once
+                        score += c.score
+                    name, source = c.name or name, GOOGLE
+                else:
+                    name, score = name or c.name, score + c.score
+                self.db.execute("UPDATE contacts SET name=?, source=?, score=?, last_ts=? WHERE email=?",
+                                (name, source, score, max(last or 0, c.last_ts), c.email))
+
+    def search_contacts(self, text: str, limit: int = 10) -> list[Contact]:
+        """Contacts whose address, name or any word of the name starts with `text`."""
+        t = text.strip().lower()
+        if not t:
+            return []
+        like = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT email, name, source, score, last_ts FROM contacts "
+                "WHERE email LIKE ? ESCAPE '\\' OR lower(name) LIKE ? ESCAPE '\\' "
+                "OR lower(name) LIKE ? ESCAPE '\\' "
+                "ORDER BY score DESC, last_ts DESC LIMIT ?",
+                (like, like, "% " + like, limit)).fetchall()
+        return [Contact(*r) for r in rows]
+
+    def all_messages(self, account: str) -> list[tuple[str, Message]]:
+        with self.lock:
+            rows = self.db.execute(f"SELECT {_COLS} FROM messages WHERE account=?", (account,)).fetchall()
+        return [(r[1], _msg(r)) for r in rows]
+
+    def meta(self, key: str) -> str | None:
+        with self.lock:
+            row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self.lock, self.db:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
+
+    def contact_count(self) -> int:
+        with self.lock:
+            return self.db.execute("SELECT count(*) FROM contacts").fetchone()[0]
 
     def forget_account(self, account: str) -> None:
         with self.lock, self.db:

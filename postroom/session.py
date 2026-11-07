@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from gi.repository import GLib
 
-from . import credentials, passwords, sending
+from . import contacts, credentials, passwords, sending
 from .config import Account
 from .imap import NETWORK_ERRORS, ImapClient, ImapError
 from .models import Folder, Message
@@ -28,6 +28,7 @@ FIRST_SYNC = 500
 class SyncResult:
     new: list[Message]
     changed: bool
+    first: bool = False   # the folder had nothing cached: everything in `new` is old mail
 
 
 def _on_main(fn, *args):
@@ -122,8 +123,38 @@ class AccountSession:
                 changed |= self.store.update_flags(acct, path, flags) > 0
             self.store.upsert(new)
             self.store.trim(acct, path, WINDOW)
-            return SyncResult(new, changed or bool(new))
+            self._harvest(path, new)
+            return SyncResult(new, changed or bool(new), first=not cached)
         return self._run(op)
+
+    # -- address book -----------------------------------------------------------------------
+    def _is_sent(self, path: str) -> bool:
+        return any(f.path == path and f.special == "sent" for f in self.folders)
+
+    def _harvest(self, path: str, msgs: list[Message]) -> None:
+        if msgs:
+            own = {self.account.email.lower()}
+            self.store.add_contacts(contacts.harvest(msgs, own, self._is_sent(path)))
+
+    def backfill_contacts(self) -> int:
+        """Once per account: collect addresses from mail already cached, and sync Sent so the
+        people you write to are known. Returns how many contacts the book holds."""
+        key = f"contacts-backfill:{self.account.id}"
+        if self.store.meta(key):
+            return self.store.contact_count()
+        by_folder: dict[str, list[Message]] = {}
+        for path, m in self.store.all_messages(self.account.id):
+            by_folder.setdefault(path, []).append(m)
+        for path, msgs in by_folder.items():
+            self._harvest(path, msgs)
+        sent = next((f for f in self.folders if f.special == "sent"), None)
+        if sent and sent.path not in by_folder:
+            try:
+                self.sync_folder(sent.path)  # harvests as it goes
+            except Exception:  # noqa: BLE001 - the address book is a nicety
+                log.exception("syncing Sent for the address book failed")
+        self.store.set_meta(key, "1")
+        return self.store.contact_count()
 
     def fetch_body(self, path: str, uid: int) -> bytes:
         raw = self.store.body(self.account.id, path, uid)

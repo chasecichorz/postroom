@@ -10,6 +10,7 @@ from .. import mime, sending
 from ..config import Account
 from ..mime import Attachment
 from .common import announce, focus_within, mods, set_label
+from .completion import AddressCompleter
 
 
 class ComposeWindow(Gtk.Window):
@@ -67,10 +68,15 @@ class ComposeWindow(Gtk.Window):
         buttons.append(self.send_btn)
         grid.attach(buttons, 0, 8, 2, 1)
 
+        # Address suggestions for To and Cc, from the address book.
+        self.completers = [
+            AddressCompleter(e, lambda t: main.store.search_contacts(t, 8), self._show_hint)
+            for e in (self.to, self.cc)]
+
         sc = Gtk.ShortcutController()
         sc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         for trig, fn in (("<Control>Return", self.send), ("<Control>KP_Enter", self.send),
-                         ("Escape", self.close), ("F6", lambda: self._cycle(1)),
+                         ("Escape", self._escape), ("F6", lambda: self._cycle(1)),
                          ("<Shift>F6", lambda: self._cycle(-1))):
             sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trig),
                                              Gtk.CallbackAction.new(lambda *_a, fn=fn: (fn(), True)[1])))
@@ -89,6 +95,21 @@ class ComposeWindow(Gtk.Window):
             self.body.grab_focus()
         else:
             self.to.grab_focus()
+
+    def _escape(self):
+        """Escape dismisses address suggestions first; otherwise it closes the window."""
+        for c in self.completers:
+            if c.active:
+                c.dismiss()
+                return
+        self.close()
+
+    def _show_hint(self, text: str | None):
+        if text:
+            self.status.set_text(text)
+            self.status.set_visible(True)
+        elif self.status.get_text().startswith("Suggestion:"):
+            self.status.set_visible(False)
 
     # -- layout helpers ---------------------------------------------------------------------
     def _row(self, grid, row, label, widget):

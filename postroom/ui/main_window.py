@@ -400,6 +400,7 @@ class MainWindow(Gtk.ApplicationWindow):
         sess = self.sessions[acct.id]
         paths = [f.path for f in folders if f.selectable]
         sess.submit(sess.folder_counts, paths, on_done=lambda c, a=acct: self._counts_loaded(a, c))
+        sess.submit(sess.backfill_contacts)
 
     def _counts_loaded(self, acct: Account, counts: dict):
         if self.account is None or acct.id != self.account.id:
