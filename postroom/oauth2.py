@@ -45,7 +45,9 @@ from dataclasses import dataclass, field
 from .config import config_dir
 
 # ----- providers (OAuth2Providers.sys.mjs, without Mozilla's client IDs) --------------------
-GOOGLE_SCOPES = "https://mail.google.com/"
+# Mail and contacts in one sign-in, as Thunderbird asks for Google mail accounts.
+GOOGLE_CONTACTS_SCOPE = "https://www.googleapis.com/auth/carddav"
+GOOGLE_SCOPES = "https://mail.google.com/ " + GOOGLE_CONTACTS_SCOPE
 MICROSOFT_SCOPES = ("https://outlook.office.com/IMAP.AccessAsUser.All "
                     "https://outlook.office.com/SMTP.Send offline_access")
 FASTMAIL_SCOPES = ("https://www.fastmail.com/dev/protocol-imap "
@@ -142,17 +144,22 @@ class Tokens:
     refresh_token: str
     access_token: str = ""
     expires: float = 0.0          # time.time() when the access token stops working
+    scope: str = ""               # what the provider actually granted, space-separated
 
     def valid(self) -> bool:
         return bool(self.access_token) and time.time() < self.expires - 60
 
+    def grants(self, scope: str) -> bool:
+        return scope in self.scope.split()
+
     def dumps(self) -> str:
-        return json.dumps({"refresh_token": self.refresh_token})
+        return json.dumps({"refresh_token": self.refresh_token, "scope": self.scope})
 
     @classmethod
     def loads(cls, s: str) -> "Tokens":
         try:
-            return cls(json.loads(s)["refresh_token"])
+            d = json.loads(s)
+            return cls(d["refresh_token"], scope=d.get("scope", ""))
         except (ValueError, KeyError, TypeError) as e:
             raise OAuthError("The saved sign-in is damaged. Sign in again.") from e
 
@@ -190,6 +197,8 @@ def refresh(issuer: Issuer, client: Client, tokens: Tokens) -> Tokens:
         raise OAuthError("The provider sent no access token.")
     tokens.access_token = result["access_token"]
     tokens.expires = time.time() + int(result.get("expires_in", 3600))
+    if result.get("scope"):
+        tokens.scope = result["scope"]
     if result.get("refresh_token"):
         tokens.refresh_token = result["refresh_token"]
     return tokens
@@ -314,9 +323,9 @@ class SignIn:
         result = _post(self.issuer.token_endpoint, form)
         if not result.get("refresh_token"):
             raise OAuthError("The provider did not allow staying signed in.")
-        t = Tokens(result["refresh_token"], result.get("access_token", ""),
-                   time.time() + int(result.get("expires_in", 3600)))
-        return t
+        return Tokens(result["refresh_token"], result.get("access_token", ""),
+                      time.time() + int(result.get("expires_in", 3600)),
+                      result.get("scope", self.issuer.scope))
 
 
 def xoauth2(user: str, access_token: str) -> str:

@@ -190,6 +190,12 @@ class OAuthTest(unittest.TestCase):
         with self.assertRaisesRegex(oauth2.OAuthError, "Sign in again"):
             oauth2.refresh(self.issuer, self.client, oauth2.Tokens("revoked"))
 
+    def test_granted_scope_is_kept(self):
+        t = oauth2.Tokens.loads(oauth2.Tokens("r", scope="a b").dumps())
+        self.assertTrue(t.grants("b") and not t.grants("c"))
+        self.assertFalse(oauth2.Tokens.loads('{"refresh_token": "r"}').grants("a"))  # older saves
+        self.assertIn(oauth2.GOOGLE_CONTACTS_SCOPE, oauth2.ISSUERS["accounts.google.com"].scope)
+
     def test_xoauth2(self):
         self.assertEqual(oauth2.xoauth2("ann@example.org", "tok"),
                          "user=ann@example.org\x01auth=Bearer tok\x01\x01")

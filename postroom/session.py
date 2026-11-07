@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import time
 from dataclasses import dataclass
 
 from gi.repository import GLib
 
-from . import contacts, credentials, passwords, sending
+from . import carddav, contacts, credentials, oauth2, passwords, sending
 from .config import Account
 from .imap import NETWORK_ERRORS, ImapClient, ImapError
 from .models import Folder, Message
@@ -155,6 +156,38 @@ class AccountSession:
                 log.exception("syncing Sent for the address book failed")
         self.store.set_meta(key, "1")
         return self.store.contact_count()
+
+    GOOGLE_CONTACTS_EVERY = 6 * 3600
+
+    def can_import_google_contacts(self) -> bool:
+        return self.account.auth == "oauth2" and self.account.is_gmail
+
+    def import_google_contacts(self, force: bool = False) -> str | None:
+        """Bring in Google contacts (at most every few hours unless `force`). Returns what
+        to tell you, or None when nothing was done."""
+        if not self.can_import_google_contacts():
+            return ("Google contacts need browser sign-in. Use File, Edit Account, then Sign "
+                    "in with browser.") if force else None
+        key = f"google-contacts:{self.account.id}"
+        last = float(self.store.meta(key) or 0)
+        if not force and time.time() - last < self.GOOGLE_CONTACTS_EVERY:
+            return None
+        try:
+            token = credentials.secret(self.account)
+        except credentials.CredentialError as e:
+            return str(e) if force else None
+        if not credentials.grants(self.account, oauth2.GOOGLE_CONTACTS_SCOPE):
+            return ("To bring in your Google contacts, sign in again so Postroom may read them: "
+                    "File, Edit Account, then Sign in with browser.") if force else None
+        try:
+            found = carddav.google_contacts(self.account.email, token)
+        except carddav.CardDavError as e:
+            log.warning("Google contacts: %s", e)
+            return str(e) if force else None
+        self.store.add_contacts(found)
+        self.store.set_meta(key, str(time.time()))
+        n = len({c.email for c in found})
+        return f"{n} Google contact{'s' if n != 1 else ''} in the address book"
 
     def fetch_body(self, path: str, uid: int) -> bytes:
         raw = self.store.body(self.account.id, path, uid)

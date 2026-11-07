@@ -268,7 +268,7 @@ class MainWindow(Gtk.ApplicationWindow):
             "focus-accounts": self.focus_accounts, "focus-folders": self.focus_folders,
             "focus-messages": self.focus_messages, "focus-status": self.focus_status,
             "focus-attachments": self.focus_attachments, "go-inbox": self.go_inbox,
-            "add-account": self.add_account,
+            "add-account": self.add_account, "update-contacts": self.update_contacts,
             "edit-account": self.edit_account, "remove-account": self.remove_account,
             "shortcuts": self.show_shortcuts, "context-menu": self.popup_message_menu,
         }
@@ -401,6 +401,8 @@ class MainWindow(Gtk.ApplicationWindow):
         paths = [f.path for f in folders if f.selectable]
         sess.submit(sess.folder_counts, paths, on_done=lambda c, a=acct: self._counts_loaded(a, c))
         sess.submit(sess.backfill_contacts)
+        sess.submit(sess.import_google_contacts,
+                    on_done=lambda msg: msg and self._set_status(msg))
 
     def _counts_loaded(self, acct: Account, counts: dict):
         if self.account is None or acct.id != self.account.id:
@@ -1042,6 +1044,14 @@ class MainWindow(Gtk.ApplicationWindow):
         self.shown_key = None
         self._show_selected()
         self.say("Reading the formatted version" if on else "Reading the plain text version")
+
+    def update_contacts(self):
+        sess = self._session()
+        if not sess:
+            return self.say("No account selected")
+        self.say("Updating contacts from Google")
+        sess.submit(lambda: sess.import_google_contacts(force=True),
+                    on_done=lambda msg: msg and self.say(msg), on_error=self._error)
 
     # ===== accounts dialogs =================================================================
     def add_account(self):

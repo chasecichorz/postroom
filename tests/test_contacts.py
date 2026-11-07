@@ -2,11 +2,13 @@
 
     python3 -m unittest tests.test_contacts
 """
+import http.server
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
-from postroom import contacts
+from postroom import carddav, contacts
 from postroom.contacts import GOOGLE, Contact
 from postroom.models import Message
 from postroom.store import Store
@@ -111,6 +113,76 @@ class StoreTest(unittest.TestCase):
         self.assertEqual([c.email for c in s.search_contacts("a_")], ["a_b@example.com"])
         self.assertEqual(s.search_contacts("a%"), [])
         self.assertEqual(s.search_contacts(""), [])
+
+
+class FakeCardDav(http.server.BaseHTTPRequestHandler):
+    """Two cards over two multiget batches; insists on the bearer token."""
+    seen = []
+
+    def _reply(self, code, body=b""):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_PROPFIND(self):  # noqa: N802
+        self.rfile.read(int(self.headers["Content-Length"]))
+        if self.headers["Authorization"] != "Bearer good":
+            return self._reply(401)
+        FakeCardDav.seen.append(("PROPFIND", self.headers["Depth"]))
+        self._reply(207, b"""<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">
+<d:response><d:href>/book/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/>
+</d:resourcetype></d:prop></d:propstat></d:response>
+<d:response><d:href>/book/1.vcf</d:href><d:propstat><d:prop><d:getetag>"1"</d:getetag>
+<d:resourcetype/></d:prop></d:propstat></d:response>
+<d:response><d:href>/book/2.vcf</d:href><d:propstat><d:prop><d:getetag>"2"</d:getetag>
+<d:resourcetype/></d:prop></d:propstat></d:response></d:multistatus>""")
+
+    def do_REPORT(self):  # noqa: N802
+        body = self.rfile.read(int(self.headers["Content-Length"])).decode()
+        FakeCardDav.seen.append(("REPORT", body.count("<d:href>")))
+        cards = {"/book/1.vcf": VCARDS.split("END:VCARD")[0] + "END:VCARD",
+                 "/book/2.vcf": "BEGIN:VCARD\nFN:Bob &amp; Co\nEMAIL:bob@example.com\nEND:VCARD"}
+        parts = "".join(
+            f'<d:response><d:href>{h}</d:href><d:propstat><d:prop><c:address-data>{v}'
+            f"</c:address-data></d:prop></d:propstat></d:response>"
+            for h, v in cards.items() if f"<d:href>{h}</d:href>" in body)
+        self._reply(207, ('<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" '
+                          f'xmlns:c="urn:ietf:params:xml:ns:carddav">{parts}</d:multistatus>').encode())
+
+    def log_message(self, *a):
+        pass
+
+
+class CardDavTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = http.server.HTTPServer(("127.0.0.1", 0), FakeCardDav)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}/book/"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def test_fetch_in_batches(self):
+        FakeCardDav.seen.clear()
+        orig = carddav.BATCH
+        carddav.BATCH = 1
+        try:
+            found = carddav.fetch(self.url, "good")
+        finally:
+            carddav.BATCH = orig
+        self.assertEqual(sorted((c.email, c.name) for c in found), [
+            ("ann.work@example.org", "Ann Lee"), ("ann@example.com", "Ann Lee"),
+            ("bob@example.com", "Bob & Co")])
+        self.assertEqual(FakeCardDav.seen, [("PROPFIND", "1"), ("REPORT", 1), ("REPORT", 1)])
+
+    def test_refused_token_is_explained(self):
+        with self.assertRaisesRegex(carddav.CardDavError, "Sign in again"):
+            carddav.fetch(self.url, "expired")
 
 
 if __name__ == "__main__":

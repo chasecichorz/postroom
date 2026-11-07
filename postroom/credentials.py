@@ -84,11 +84,18 @@ def secret(account: Account) -> str:
         if tokens.valid():
             return tokens.access_token
         issuer, client = issuer_and_client(account)
-        old_refresh = tokens.refresh_token
+        before = tokens.dumps()
         try:
             oauth2.refresh(issuer, client, tokens)
         except oauth2.OAuthError as e:
             raise CredentialError(str(e)) from e
-        if tokens.refresh_token != old_refresh:  # some providers rotate it
+        if tokens.dumps() != before:  # a rotated refresh token, or a newly known scope
             passwords.store(_key(account.id), f"Postroom sign-in: {account.email}", tokens.dumps())
         return tokens.access_token
+
+
+def grants(account: Account, scope: str) -> bool:
+    """Whether the account's browser sign-in allows `scope` (call after secret())."""
+    with _lock:
+        t = _tokens.get(account.id)
+        return bool(t and t.grants(scope))

@@ -81,6 +81,7 @@ class PostroomApp(Gtk.Application):
             [("_New Message", "win.compose")],
             [("_Add Account…", "win.add-account"), ("_Edit Account…", "win.edit-account"),
              ("_Remove Account…", "win.remove-account")],
+            [("Update _Contacts from Google", "win.update-contacts")],
             [("_Quit", "app.quit")]]))
         bar.append_submenu("_Message", _menu(MESSAGE_SECTIONS))
         view = _menu([
