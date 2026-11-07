@@ -82,7 +82,8 @@ class FakeClient:
     is_gmail = True
 
     def connect(self):
-        if FakeClient.fail_login or self.password != "secret":
+        pw = self.password() if callable(self.password) else self.password
+        if FakeClient.fail_login or pw != "secret":
             raise ImapError("Sign-in failed: [AUTHENTICATIONFAILED] Invalid credentials")
 
     def close(self):
@@ -95,7 +96,7 @@ class FakeClient:
         msgs = self.mb.folders[path]
         return len(msgs), sum(1 for _, f in msgs.values() if "\\seen" not in f)
 
-    def select(self, path):
+    def select(self, path, readonly=False):
         self.selected = path
         return len(self.mb.folders[path]), self.mb.uidvalidity
 

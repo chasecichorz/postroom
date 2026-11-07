@@ -119,7 +119,11 @@ def main(argv=None) -> int:
     for d in (config_dir(), cache_dir()):
         d.mkdir(parents=True, exist_ok=True)
         d.chmod(0o700)
+    argv = list(argv if argv is not None else sys.argv)
+    if "--background" in argv[1:]:
+        from .background import run
+        return run()
     log_dir = cache_dir()
     logging.basicConfig(filename=log_dir / "postroom.log", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    return PostroomApp().run(argv if argv is not None else sys.argv)
+    return PostroomApp().run(argv)

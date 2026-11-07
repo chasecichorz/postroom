@@ -62,6 +62,20 @@ New mail plays a short chime (Postroom's own sound, made by the app) and says wh
 from, like "New mail from Ann Lee: Lunch on Friday?". The View menu turns the sound
 (Play a Sound for New Mail) and the announcement (Say Who New Mail Is From) on or off.
 
+### When Postroom is closed
+
+`postroom --background` keeps checking every account's Inbox when the window is closed. It
+opens the Inbox read-only, plays the chime, and speaks who new mail is from through
+speech-dispatcher (`spd-say`), as I38's own scripts do. It also sends a desktop
+notification when a notification service such as dunst is running. It stays quiet while
+the Postroom window is open, and never announces mail you've already been told about. Its
+log is `~/.cache/postroom/background.log`. To start it with i3, add this to
+`~/.config/i3/customizations`:
+
+```
+exec --no-startup-id ~/.local/bin/postroom --background
+```
+
 ## Address book
 
 Postroom learns addresses from your mail: people who write to you, and especially people
@@ -125,6 +139,7 @@ Ctrl+Enter or Alt+S send, and Escape to close (it asks before throwing away your
 python3 -m unittest tests.test_core                                # mail, cache, threading
 python3 -m unittest tests.test_accounts                            # finding servers, browser sign-in
 python3 -m unittest tests.test_contacts                            # address book, Google contacts
+python3 -m unittest tests.test_background                          # checking while closed
 xvfb-run -a dbus-run-session -- python3 -m tests.completion_probe  # what To suggestions say
 xvfb-run -a dbus-run-session -- python3 -m tests.ui_smoke          # the window, on a hidden screen
 xvfb-run -a dbus-run-session -- python3 -m tests.a11y_probe        # what a screen reader is told

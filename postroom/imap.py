@@ -244,9 +244,10 @@ class ImapClient:
         d = dict(zip(vals[::2], vals[1::2]))
         return int(d.get("MESSAGES", 0)), int(d.get("UNSEEN", 0))
 
-    def select(self, path: str) -> tuple[int, int]:
+    def select(self, path: str, readonly: bool = False) -> tuple[int, int]:
+        """Open a folder; `readonly` uses EXAMINE, so nothing in it can change."""
         c = self._c()
-        data = self._ok(c.select(quote(path)), f"Opening {path}")
+        data = self._ok(c.select(quote(path), readonly=readonly), f"Opening {path}")
         self.selected = path
         exists = int(data[0] or 0)
         uv = c.untagged_responses.pop("UIDVALIDITY", [b"0"])[-1]
