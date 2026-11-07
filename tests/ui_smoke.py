@@ -235,12 +235,13 @@ def subfolder(win):
     check("F6 cycles the four panes", order == ["messages", "reading", "accounts", "folders", "messages"],
           str(order))
     win.focus_folders()
-    win.folder_sel.set_selected(0)
+    win.go_inbox()
 
 
 @step(900)
 def back_to_inbox(win):
-    check("back in inbox", win.folder.special == "inbox")
+    check("Alt+I opens the inbox", win.folder.special == "inbox")
+    check("Alt+I lands in the message list", focus_name(win) == "messages", focus_name(win))
     FakeClient.mailbox.add("INBOX", FakeClient.mailbox.folders["INBOX"][
         next(iter(FakeClient.mailbox.folders["INBOX"]))][0].replace(b"Lunch", b"Dinner"), set(), "t7")
     win.refresh()

@@ -257,7 +257,8 @@ class MainWindow(Gtk.ApplicationWindow):
             "next-pane": lambda: self.cycle_pane(1), "prev-pane": lambda: self.cycle_pane(-1),
             "focus-accounts": self.focus_accounts, "focus-folders": self.focus_folders,
             "focus-messages": self.focus_messages, "focus-status": lambda: self.status.grab_focus(),
-            "focus-attachments": self.focus_attachments, "add-account": self.add_account,
+            "focus-attachments": self.focus_attachments, "go-inbox": self.go_inbox,
+            "add-account": self.add_account,
             "edit-account": self.edit_account, "remove-account": self.remove_account,
             "shortcuts": self.show_shortcuts, "context-menu": self.popup_message_menu,
         }
@@ -279,7 +280,7 @@ class MainWindow(Gtk.ApplicationWindow):
         for trigger, action in (("F6", "win.next-pane"), ("<Shift>F6", "win.prev-pane"),
                                 ("<Control>1", "win.focus-accounts"), ("<Control>2", "win.focus-folders"),
                                 ("<Control>3", "win.focus-messages"), ("<Control>9", "win.focus-status"),
-                                ("<Alt>a", "win.focus-attachments")):
+                                ("<Alt>a", "win.focus-attachments"), ("<Alt>i", "win.go-inbox")):
             sc.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(trigger),
                                              Gtk.NamedAction.new(action)))
         self.add_controller(sc)
@@ -447,6 +448,8 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         self.folder = item.folder
         self.msg_heading.set_text(f"{item.node.name}, {self.account.name}")
+        # Orca speaks the list's name on entering it, so say which folder this is.
+        set_label(self.msg_view, f"{item.node.name} messages")
         self.shown_key = None
         self._populate(self.store.messages(self.account.id, self.folder.path))
         if not self.messages:
@@ -714,6 +717,18 @@ class MainWindow(Gtk.ApplicationWindow):
         if self.msg_stack.get_visible_child_name() == "list" and focus_list(self.msg_view, self.msg_sel):
             return
         self.msg_empty.grab_focus()
+
+    def go_inbox(self):
+        """Alt+I: open the current account's Inbox and move to its message list."""
+        if not self.account:
+            return self.say("No accounts. Open the File menu and choose Add Account.")
+        for i in range(self.folder_model.get_n_items()):
+            f = self.folder_model.get_item(i).get_item().folder
+            if f and f.special == "inbox":
+                self.folder_sel.set_selected(i)
+                self.focus_messages()
+                return
+        self.say("This account's Inbox hasn't loaded yet")
 
     def focus_reading(self):
         self.body.grab_focus()

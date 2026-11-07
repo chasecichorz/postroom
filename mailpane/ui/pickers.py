@@ -124,6 +124,7 @@ def _short(url: str) -> str:
 SHORTCUTS = """Main window
 F6 / Shift+F6: next / previous pane (accounts, folders, messages, reading pane)
 Ctrl+1: account list.  Ctrl+2: folder tree.  Ctrl+3: message list.  Ctrl+9: status bar
+Alt+I: go to the Inbox
 Alt+A: attachments of the open message
 F10: menu bar.  Shift+F10 or the Menu key: actions for the selected message
 

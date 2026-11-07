@@ -58,6 +58,7 @@ These match QuickMail's wherever QuickMail has the same command.
 | Ctrl+Q / Ctrl+U | Mark read / unread |
 | K | Star or unstar |
 | Alt+Down / Alt+Up | Next / previous unread |
+| Alt+I | Go to the Inbox |
 | Alt+A | Attachments of the open message |
 | Ctrl+Shift+O | Links in the open message |
 | Ctrl+Shift+H | Switch between the plain text and formatted versions |

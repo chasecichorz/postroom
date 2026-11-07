@@ -22,6 +22,7 @@ KEYS = [
     ("Right (expand)", "Right"), ("Right (into)", "Right"), ("Down", "Down"),
     ("Left (parent)", "Left"), ("Left (collapse)", "Left"),
     ("Enter (open)", "Return"), ("Escape", "Escape"),
+    ("Ctrl+2 folders", "ctrl+2"), ("Down", "Down"), ("Alt+I inbox", "alt+i"),
     ("Ctrl+2 folders", "ctrl+2"), ("Down", "Down"), ("Ctrl+1 accounts", "ctrl+1"),
     ("F6", "F6"), ("F6", "F6"), ("F6", "F6"), ("Shift+F6", "shift+F6"),
     ("Ctrl+3 messages", "ctrl+3"), ("K star", "k"), ("Ctrl+Q read", "ctrl+q"),

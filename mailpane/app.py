@@ -35,6 +35,7 @@ ACCELS = {
     "win.focus-messages": ["<Control>3"],
     "win.focus-status": ["<Control>9"],
     "win.focus-attachments": ["<Alt>a"],
+    "win.go-inbox": ["<Alt>i"],
 }
 
 
@@ -88,7 +89,7 @@ class MailpaneApp(Gtk.Application):
              ("Read the _Formatted Version", "win.prefer-html")],
             [("Next _Unread Message", "win.next-unread"),
              ("_Previous Unread Message", "win.prev-unread")],
-            [("Go to _Accounts", "win.focus-accounts"), ("Go to F_olders", "win.focus-folders"),
+            [("Go to _Inbox", "win.go-inbox"), ("Go to _Accounts", "win.focus-accounts"), ("Go to F_olders", "win.focus-folders"),
              ("Go to _Messages", "win.focus-messages"), ("Go to Attac_hments", "win.focus-attachments"),
              ("Go to _Status Bar", "win.focus-status")]])
         bar.append_submenu("_View", view)
