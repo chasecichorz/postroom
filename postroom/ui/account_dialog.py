@@ -31,14 +31,31 @@ class AccountDialog(Gtk.Window):
         self.full_name = self._field(grid, 1, "_Your name, as recipients see it")
         self.email = self._field(grid, 2, "_Email address")
         self.email.set_input_purpose(Gtk.InputPurpose.EMAIL)
+        # A hidden field the screen reader keeps private, and a plain one for checking what
+        # was pasted. "Show password" swaps between them; they always hold the same text.
         self.password = Gtk.PasswordEntry(show_peek_icon=True, hexpand=True)
-        self._attach(grid, 3, "App _password", self.password)
-        set_description(self.password, GMAIL_HELP if not account else
-                        "Leave this empty to keep the saved password.")
+        self.password_plain = Gtk.Entry(hexpand=True)
+        self.password_stack = Gtk.Stack(hexpand=True)
+        self.password_stack.add_child(self.password)
+        self.password_stack.add_child(self.password_plain)
+        self.password_label = self._attach(grid, 3, "App _password", self.password_stack,
+                                           focus=self.password)
+        set_label(self.password_plain, "App password, shown")
+        pw_help = GMAIL_HELP if not account else "Leave this empty to keep the saved password."
+        set_description(self.password, pw_help)
+        set_description(self.password_plain, pw_help)
+        self._count_source = 0
+        self.password.connect("changed", self._password_changed)
+
+        self.show_pw = Gtk.CheckButton(label="Sho_w password", use_underline=True)
+        set_description(self.show_pw, "Shows the password as ordinary text so you can check "
+                        "it. Your screen reader will read it aloud.")
+        self.show_pw.connect("toggled", self._toggle_password)
+        grid.attach(self.show_pw, 1, 4, 1, 1)
 
         help_label = Gtk.Label(label=GMAIL_HELP, wrap=True, xalign=0, max_width_chars=60)
         help_label.add_css_class("dim")
-        grid.attach(help_label, 0, 4, 2, 1)
+        grid.attach(help_label, 0, 5, 2, 1)
 
         exp = Gtk.Expander(label="_Server settings (only for providers other than Gmail)",
                            use_underline=True)
@@ -48,10 +65,10 @@ class AccountDialog(Gtk.Window):
         self.imap_port = self._field(sgrid, 1, "IMAP p_ort")
         self.smtp_host = self._field(sgrid, 2, "S_MTP server")
         self.smtp_port = self._field(sgrid, 3, "SMTP po_rt")
-        grid.attach(exp, 0, 5, 2, 1)
+        grid.attach(exp, 0, 6, 2, 1)
 
         self.error = Gtk.Label(wrap=True, xalign=0, selectable=True, visible=False)
-        grid.attach(self.error, 0, 6, 2, 1)
+        grid.attach(self.error, 0, 7, 2, 1)
 
         buttons = Gtk.Box(spacing=8, halign=Gtk.Align.END)
         cancel = Gtk.Button(label="_Cancel", use_underline=True)
@@ -61,12 +78,13 @@ class AccountDialog(Gtk.Window):
         self.save_btn.connect("clicked", self._save)
         buttons.append(cancel)
         buttons.append(self.save_btn)
-        grid.attach(buttons, 0, 7, 2, 1)
+        grid.attach(buttons, 0, 8, 2, 1)
         self.set_default_widget(self.save_btn)
         for e in (self.name, self.full_name, self.email, self.imap_host, self.imap_port,
                   self.smtp_host, self.smtp_port):
             e.set_activates_default(True)
         self.password.connect("activate", self._save)
+        self.password_plain.connect("activate", self._save)
 
         a = account or Account(name="", email="")
         self.name.set_text(a.name)
@@ -88,11 +106,42 @@ class AccountDialog(Gtk.Window):
         self._attach(grid, row, label, entry)
         return entry
 
-    def _attach(self, grid, row, label, widget):
-        lbl = Gtk.Label(label=label, use_underline=True, mnemonic_widget=widget, xalign=0)
-        set_label(widget, label.replace("_", ""))
+    def _attach(self, grid, row, label, widget, focus=None):
+        focus = focus or widget
+        lbl = Gtk.Label(label=label, use_underline=True, mnemonic_widget=focus, xalign=0)
+        set_label(focus, label.replace("_", ""))
         grid.attach(lbl, 0, row, 1, 1)
         grid.attach(widget, 1, row, 1, 1)
+        return lbl
+
+    def _password_widget(self) -> Gtk.Widget:
+        return self.password_plain if self.show_pw.get_active() else self.password
+
+    def _password_text(self) -> str:
+        return self._password_widget().get_text()
+
+    def _toggle_password(self, button):
+        shown = button.get_active()
+        src, dst = (self.password, self.password_plain) if shown else (self.password_plain, self.password)
+        dst.set_text(src.get_text())
+        src.set_text("")
+        self.password_stack.set_visible_child(dst)
+        self.password_label.set_mnemonic_widget(dst)
+        announce(self, "Password shown" if shown else "Password hidden")
+
+    def _password_changed(self, entry):
+        """Say how long the hidden password is, so a paste can be confirmed without hearing it."""
+        if self._count_source:
+            GLib.source_remove(self._count_source)
+
+        def say():
+            self._count_source = 0
+            if not self.show_pw.get_active():
+                n = len(entry.get_text().replace(" ", ""))  # spaces are ignored on save
+                announce(self, "Password field empty" if n == 0 else
+                         f"Password field has {n} character{'s' if n != 1 else ''}")
+            return False
+        self._count_source = GLib.timeout_add(500, say)
 
     def _show_error(self, text: str, focus: Gtk.Widget | None = None):
         self.error.set_text(text)
@@ -103,11 +152,11 @@ class AccountDialog(Gtk.Window):
 
     def _save(self, *_):
         email = self.email.get_text().strip()
-        pw = self.password.get_text().replace(" ", "").strip()
+        pw = self._password_text().replace(" ", "").strip()
         if "@" not in email:
             return self._show_error("Enter your full email address.", self.email)
         if not pw and not self.account:
-            return self._show_error("Enter the app password.", self.password)
+            return self._show_error("Enter the app password.", self._password_widget())
         try:
             imap_port, smtp_port = int(self.imap_port.get_text()), int(self.smtp_port.get_text())
         except ValueError:
@@ -140,7 +189,7 @@ class AccountDialog(Gtk.Window):
         self.save_btn.set_sensitive(True)
         if err:
             hint = " Make sure you used an app password." if acct.is_gmail and "fail" in err.lower() else ""
-            self._show_error(err + hint, self.password)
+            self._show_error(err + hint, self._password_widget())
             return
         passwords.store(acct.id, f"Postroom: {acct.email}", pw)
         self.on_saved(acct, self.account is None)
