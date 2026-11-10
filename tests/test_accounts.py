@@ -156,7 +156,7 @@ class OAuthTest(unittest.TestCase):
         self.assertEqual(q["client_id"], "postroom-test")
         self.assertEqual(q["code_challenge_method"], "S256")
         self.assertEqual(q["login_hint"], "ann@example.org")
-        self.assertTrue(q["redirect_uri"].startswith("http://127.0.0.1:"))
+        self.assertRegex(q["redirect_uri"], r"^http://127\.0\.0\.1:\d+$")  # no "/", as Thunderbird
         self.assertIn("Signed in to Postroom", page)
         t = s.wait(5)
         self.assertEqual((t.refresh_token, t.access_token), ("refresh-1", "access-1"))

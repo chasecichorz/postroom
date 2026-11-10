@@ -5,4 +5,4 @@ Read AGENTS.md here, then read the running cross-assistant handoff at
 See ROADMAP.md for the code review and release priorities.
 
 If working in a separate Git worktree, the parent handoff might not be present;
-obtain the current handoff from /home/chase/email/CLAUDE.md before editing.
+obtain the current handoff from the parent directory's CLAUDE.md before editing.

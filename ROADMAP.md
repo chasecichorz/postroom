@@ -67,10 +67,9 @@ been checked. Full UI validation of the new work remains pending.
 ## Distribution decisions
 
 Original code is GPL-3.0-or-later (chosen by the user 2026-11-10); autoconfig.py
-and oauth2.py keep their MPL 2.0 notices. At the user's request, oauth2.py falls back
-to Thunderbird's client IDs for a private, educational build kept in a private GitHub
-repo. Before any public release, replace them with Postroom's own registrations and
-never ship user configuration. Existing local credentials were not altered.
+and oauth2.py keep their MPL 2.0 notices. At the user's request, oauth2.py uses
+Thunderbird's public client IDs unless oauth-clients.json supplies others. Never ship
+user configuration. Existing local credentials were not altered.
 The user decides separately whether to enable background startup.
 
 ## Coordination

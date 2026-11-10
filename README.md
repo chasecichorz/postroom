@@ -48,9 +48,8 @@ Then either:
   Postroom keeps a refresh token in place of a password. Available for providers whose registration supports Postroom’s local callback.
   Yahoo and AOL currently need app passwords.
 
-This private build falls back to Thunderbird's registrations for Google, Microsoft and
-Fastmail, so the sign-in page names Thunderbird. Those IDs belong to Mozilla and may stop
-working at any time. To use your own registrations instead, put the client IDs in
+Postroom uses Thunderbird's public registrations for Google, Microsoft and Fastmail, so the
+sign-in page names Thunderbird. To use your own registrations instead, put the client IDs in
 `~/.config/postroom/oauth-clients.json`:
 
 ```json
@@ -200,9 +199,8 @@ launcher at ~/.local/bin/postroom, your PATH may still choose it first; `type -a
 postroom` shows both. Use /usr/bin/postroom to run the packaged version explicitly.
 Your current settings remain in the same per-user location.
 
-This is a private build. `postroom/oauth2.py` falls back to Thunderbird's OAuth
-client IDs for educational use. Replace them with Postroom's own registrations
-before publishing the source or a package.
+Browser sign-in uses Thunderbird's public OAuth client IDs unless you add your own
+in `~/.config/postroom/oauth-clients.json`.
 
 ## Tests
 

@@ -4,7 +4,6 @@ pkgver=0.2.0
 pkgrel=1
 pkgdesc='Accessible keyboard-first GTK email client'
 arch=('any')
-# Private build: oauth2.py embeds Thunderbird's client IDs. Do not publish this package.
 license=('GPL-3.0-or-later' 'MPL-2.0')
 depends=('python' 'python-gobject' 'gtk4>=4.24' 'libsecret')
 checkdepends=('xorg-server-xvfb' 'xorg-xauth' 'xdotool' 'dbus' 'at-spi2-core')
@@ -15,7 +14,7 @@ optdepends=('speech-dispatcher: spoken background mail notifications'
             'alsa-utils: alternative new-mail sound through aplay')
 source=("postroom-$pkgver.tar.gz")
 # Updated by packaging/make_source.py for the generated local source snapshot.
-sha256sums=('8bffb6d83875cca5bfc51d7f310cb2bcc06f4bd4aa069394c370d3abe1d36e9e')
+sha256sums=('71dac0039f29a8350b755d199c45331ecbea401417e4a38f86d593e66f7a2265')
 
 check() {
     cd "$srcdir/postroom-$pkgver"

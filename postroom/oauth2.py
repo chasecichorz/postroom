@@ -17,12 +17,9 @@ This follows the flow Thunderbird uses with an external browser:
 4. The refresh token is stored like a password. Access tokens last about an hour and are
    renewed from it silently.
 
-PRIVATE / EDUCATIONAL BUILD: THUNDERBIRD_CLIENTS below holds Mozilla's Thunderbird
-client IDs, copied from OAuth2Providers.sys.mjs. They are registered to Thunderbird, so
-sign-in pages name Thunderbird, and Mozilla or the provider may revoke them at any time.
-Remove them and use Postroom's own registrations before any public release.
-
-A registration in ~/.config/postroom/oauth-clients.json takes priority:
+THUNDERBIRD_CLIENTS below holds Thunderbird's public client IDs from
+OAuth2Providers.sys.mjs, so sign-in pages name Thunderbird. A registration in
+~/.config/postroom/oauth-clients.json takes priority:
 
     {"accounts.google.com": {"client_id": "...", "client_secret": "..."},
      "login.microsoftonline.com": {"client_id": "..."}}
@@ -47,7 +44,7 @@ from dataclasses import dataclass, field
 
 from .config import config_dir
 
-# ----- providers (OAuth2Providers.sys.mjs, without Mozilla's client IDs) --------------------
+# ----- providers (OAuth2Providers.sys.mjs) ---------------------------------------------------
 # Mail and contacts in one sign-in, as Thunderbird asks for Google mail accounts.
 GOOGLE_CONTACTS_SCOPE = "https://www.googleapis.com/auth/carddav"
 GOOGLE_SCOPES = "https://mail.google.com/ " + GOOGLE_CONTACTS_SCOPE
@@ -128,9 +125,8 @@ def clients_path():
     return config_dir() / "oauth-clients.json"
 
 
-# Thunderbird's built-in registrations (OAuth2Providers.sys.mjs). Private/educational use
-# only; see the module docstring. Fastmail's needs no secret, nor do Microsoft's, Yahoo's
-# or AOL's.
+# Thunderbird's built-in registrations (OAuth2Providers.sys.mjs). Only Google's has a
+# secret, which Google treats as public for desktop apps.
 THUNDERBIRD_CLIENTS = {
     "accounts.google.com": Client(
         "406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com",
@@ -257,8 +253,10 @@ class SignIn:
         self._sock.settimeout(1.0)  # wake up regularly so cancel() really stops the listener
         port = self._sock.getsockname()[1]
         base = urllib.parse.urlsplit(self.issuer.redirect)
+        # No "/" is added when the endpoint has no path: providers may match the
+        # registered redirect exactly, as Thunderbird's startLoopbackRedirectListener notes.
         self._redirect = urllib.parse.urlunsplit(
-            (base.scheme, f"{base.hostname}:{port}", base.path or "/", "", ""))
+            (base.scheme, f"{base.hostname}:{port}", base.path, "", ""))
         params = [("response_type", "code"), ("client_id", self.client.client_id),
                   ("redirect_uri", self._redirect), ("scope", self.issuer.scope),
                   ("state", self._state)]
