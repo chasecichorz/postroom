@@ -12,13 +12,14 @@ VERSION = '0.2.0'
 
 
 def source_files():
-    for name in ('README.md', 'ROADMAP.md'):
+    for name in ('README.md', 'install.sh'):
         yield ROOT / name
     for directory, suffix in (('postroom', '.py'), ('tests', '.py'), ('tests', '.sh'), ('data', '.desktop'),
                               ('LICENSES', '.txt')):
         yield from sorted(path for path in (ROOT / directory).rglob('*' + suffix)
                           if not path.is_symlink())
-    yield ROOT / 'packaging' / 'postroom'
+    for name in ('postroom', 'stage.sh', 'build_deb.py', 'postroom.spec', 'make_source.py'):
+        yield ROOT / 'packaging' / name
 
 
 def main():

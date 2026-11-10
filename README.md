@@ -12,7 +12,7 @@ Built with GTK 4 and Python, and designed for Cthulhu and other AT-SPI screen re
 ```
 
 It needs Python 3, GTK 4, PyGObject and libsecret, which are all standard on Arch
-(`gtk4 python-gobject libsecret`). Nothing else has to be installed.
+(`gtk4 python-gobject libsecret`). To install it as a package, see Installing below.
 
 The first time it starts, the Add Account window opens. The Account type combo box
 offers Find from email address, Gmail, Outlook / Microsoft 365, Yahoo, AOL, Fastmail,
@@ -174,30 +174,34 @@ loads the next 500 earlier messages, or another page of search results. Delibera
 history loading increases the folder's cache allowance so routine refreshes keep
 that larger history window. No extra controls are added to the main Tab order.
 
-## Arch package
+## Installing
 
-From this repository, make a source snapshot and build a local package:
-
-```sh
-python3 packaging/make_source.py
-makepkg
-```
-
-The snapshot includes only application source, fake-data tests, documentation,
-license notices and the launcher/desktop entry. It includes uncommitted source
-changes but no user configuration, tokens, mail caches or debug logs. The snapshot
-script updates PKGBUILD's SHA-256 checksum. Regenerate it after editing source.
-`makepkg` runs the unit and hidden-display smoke tests; test dependencies include
-Xvfb, xauth, xdotool and D-Bus. Install the resulting package with:
+`install.sh` builds a native package for your distribution and installs it. Run it as
+your normal user; it asks for your sudo password when it installs.
 
 ```sh
-sudo pacman -U postroom-0.2.0-1-any.pkg.tar.zst
+sh install.sh               # Arch (makepkg), Debian/Ubuntu (.deb) or Fedora (.rpm)
+sh install.sh --build-only  # only build the package
+sh install.sh --generic     # other distributions: copy into /usr/local
+sh install.sh --uninstall   # remove it again
 ```
 
-The package installs /usr/bin/postroom and a desktop entry. If you keep a checkout
+You can also build each package by hand:
+
+- Arch: `python3 packaging/make_source.py && makepkg -si`
+- Debian or Ubuntu: `python3 packaging/build_deb.py`, then
+  `sudo apt install ./dist/postroom_0.2.0-1_all.deb`
+- Fedora: `sudo dnf install rpm-build`, `python3 packaging/make_source.py`, then
+  `rpmbuild -bb --define "_sourcedir $PWD" packaging/postroom.spec`
+
+Dependencies are pulled in by the package manager: Python 3.10 or later, PyGObject,
+GTK 4 and libsecret. Speech Dispatcher, libnotify and PipeWire are recommended for
+background mail alerts. The Debian and Fedora packages keep Postroom's modules in
+/usr/share/postroom; the Arch package uses Python's site-packages.
+
+The packages install /usr/bin/postroom and a desktop entry. If you keep a checkout
 launcher at ~/.local/bin/postroom, your PATH may still choose it first; `type -a
-postroom` shows both. Use /usr/bin/postroom to run the packaged version explicitly.
-Your current settings remain in the same per-user location.
+postroom` shows both. Your settings in ~/.config/postroom are never touched.
 
 Browser sign-in uses Thunderbird's public OAuth client IDs unless you add your own
 in `~/.config/postroom/oauth-clients.json`.
@@ -235,8 +239,3 @@ version 3 of the License, or (at your option) any later version. See
 setup and OAuth code and stay under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/),
 as that license requires. Thunderbird's source is at
 <https://github.com/thunderbird/thunderbird-desktop>.
-
-## Development priorities
-
-See [ROADMAP.md](ROADMAP.md) for the code review, remaining features, accessibility
-acceptance checks, and release blockers.

@@ -14,7 +14,7 @@ optdepends=('speech-dispatcher: spoken background mail notifications'
             'alsa-utils: alternative new-mail sound through aplay')
 source=("postroom-$pkgver.tar.gz")
 # Updated by packaging/make_source.py for the generated local source snapshot.
-sha256sums=('71dac0039f29a8350b755d199c45331ecbea401417e4a38f86d593e66f7a2265')
+sha256sums=('7d21a27fcf241b0f99462f2acf9f64728b9127549d648c260a6811aa8b68ac0b')
 
 check() {
     cd "$srcdir/postroom-$pkgver"

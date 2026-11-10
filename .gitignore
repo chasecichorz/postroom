@@ -6,3 +6,9 @@ __pycache__/
 /*.pkg.tar.*
 /postroom-*.tar.gz
 /ui-check.log
+/dist/
+
+# Local assistant handoff notes
+/CLAUDE.md
+/AGENTS.md
+/ROADMAP.md
