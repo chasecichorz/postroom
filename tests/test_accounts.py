@@ -207,10 +207,15 @@ class OAuthTest(unittest.TestCase):
         self.assertEqual(oauth2.issuer_for("eu.imap.mail.yahoo.com").name, "login.yahoo.com")
         self.assertIsNone(oauth2.issuer_for("mail.example.org"))
 
-    def test_no_mozilla_client_ids_shipped(self):
-        from pathlib import Path
-        src = Path(oauth2.__file__).read_text()
-        self.assertNotIn(".apps.googleusercontent.com", src)
+    def test_user_registration_overrides_builtin(self):
+        google = oauth2.ISSUERS["accounts.google.com"]
+        self.assertIs(oauth2.client_for(google), oauth2.THUNDERBIRD_CLIENTS[google.name])
+        oauth2.clients_path().parent.mkdir(parents=True, exist_ok=True)
+        oauth2.clients_path().write_text('{"accounts.google.com": {"client_id": "mine"}}')
+        try:
+            self.assertEqual(oauth2.client_for(google).client_id, "mine")
+        finally:
+            oauth2.clients_path().unlink()
 
 
 class CredentialsTest(unittest.TestCase):
@@ -244,8 +249,13 @@ class CredentialsTest(unittest.TestCase):
         a = Account(name="G", email="g@gmail.com", auth="oauth2")
         credentials.save_oauth(a, oauth2.Tokens("r1"))
         credentials._tokens.clear()
-        with self.assertRaisesRegex(credentials.CredentialError, "registration"):
-            credentials.secret(a)
+        saved = dict(oauth2.THUNDERBIRD_CLIENTS)
+        oauth2.THUNDERBIRD_CLIENTS.clear()  # no built-in fallback, and no network use
+        try:
+            with self.assertRaisesRegex(credentials.CredentialError, "registration"):
+                credentials.secret(a)
+        finally:
+            oauth2.THUNDERBIRD_CLIENTS.update(saved)
 
     def test_forget(self):
         a = Account(name="G", email="g@gmail.com", auth="oauth2")

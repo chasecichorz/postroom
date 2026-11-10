@@ -23,7 +23,7 @@ from tests.fake_imap import FakeClient, _raw  # noqa: E402
 
 session.ImapClient = FakeClient
 SENT = []
-sending.send = lambda account, pw, msg: SENT.append(msg)
+sending.send = lambda account, pw, msg, **kwargs: SENT.append(msg)
 CHIMES = []
 sounds.play_new_mail = lambda: CHIMES.append(1) or True  # never play aloud in tests
 
@@ -344,6 +344,119 @@ def new_mail_announced(win):
 def new_mail_sound_off(win):
     check("no chime when the sound is off", CHIMES == [], str(CHIMES))
     check("still announced", "New mail from Yve: Second" in win.status.get_text(), win.status.get_text())
+
+
+@step(300)
+def draft_save_and_close(win):
+    from postroom.mime import Attachment
+    draft = sending.Draft(to="ann@example.com", subject="Recover me", body="Saved body",
+                          attachments=[Attachment("draft.txt", "text/plain", b"private test content")])
+    win._open_compose(draft)
+    c = win.composers[draft.id]
+    c.body.get_buffer().place_cursor(c.body.get_buffer().get_iter_at_offset(4))
+    check("draft save succeeds", c.save_draft())
+    win._saved_draft_id = draft.id
+    c.close()
+
+
+@step(300)
+def draft_reopen(win):
+    check("closing composer retains draft", any(row[0] == win._saved_draft_id for row in win.app.drafts.list()))
+    win.show_drafts()
+    picker = next(w for w in Gtk.Window.list_toplevels() if w.get_title() == "Saved Drafts")
+    picker._pick(picker.list.get_row_at_index(0))
+    c = win.composers[win._saved_draft_id]
+    check("reopened draft body", c._capture().body == "Saved body")
+    check("reopened draft attachment", c.attachments[0].data == b"private test content")
+    check("reopened draft cursor", c.body.get_buffer().props.cursor_position == 4)
+    c.discard()
+    prompt = c._discard_prompt
+    check("discard confirmation is ordinary window", not prompt.get_modal() and prompt.get_transient_for() is None)
+    buttons = prompt.get_child().get_last_child()
+    buttons.get_last_child().emit("clicked")
+    check("discard removes saved draft", all(row[0] != win._saved_draft_id for row in win.app.drafts.list()))
+    win._partial_transport = sending.send
+    sending.send = lambda account, pw, msg, **kw: sending.SendResult(["ann@example.com"], ["bob@example.com"])
+    draft = sending.Draft(to="ann@example.com", cc="bob@example.com", subject="Partial delivery", body="Hi")
+    win._open_compose(draft)
+    win._partial_draft_id = draft.id
+    win.composers[draft.id].send()
+
+
+@step(500)
+def partial_delivery(win):
+    c = win.composers[win._partial_draft_id]
+    check("partial delivery keeps composer open", c.send_btn.get_sensitive())
+    check("partial retry excludes accepted recipient", c.to.get_text() == "" and c.cc.get_text() == "bob@example.com")
+    check("partial delivery explained", "Only those remaining recipients" in c.status.get_text())
+    check("partial delivery is recoverable", win.app.drafts.load(c.draft.id)[1].pending_recipients == ["bob@example.com"])
+    win.app.drafts.delete(c.draft.id)
+    c.sent = True
+    c.destroy()
+    sending.send = win._partial_transport
+    # Change the provider combo without contacting a server.
+    win.add_account()
+    d = next(w for w in Gtk.Window.list_toplevels() if type(w).__name__ == "AccountDialog")
+    check("account type named combo exists", d.account_type.get_selected() == 0)
+    d.account_type.set_selected(1)
+    check("Gmail preset selected", d._selected_type == "gmail" and d.imap_host.get_text() == "imap.gmail.com")
+    d.account_type.set_selected(7)
+    check("Other allows custom servers", d._servers_edited and d.imap_host.get_text() == "")
+    d.close()
+    win.go_inbox()
+
+
+@step(300)
+def local_sent_copy(win):
+    from pathlib import Path
+    win.show_local_sent()
+    picker = next(w for w in Gtk.Window.list_toplevels() if w.get_title() == "Local Sent Copies")
+    picker._pick(picker.list.get_row_at_index(0))
+    reader = next(w for w in Gtk.Window.list_toplevels() if type(w).__name__ == "LocalSentWindow")
+    box = reader.get_child()
+    entry = box.get_first_child()
+    while not isinstance(entry, Gtk.Entry):
+        entry = entry.get_next_sibling()
+    target = Path(os.environ["POSTROOM_PROFILE"]) / "accepted-copy.eml"
+    entry.set_text(str(target))
+    save_button = box.get_last_child()
+    save_button.emit("clicked")
+    check("local accepted mail can be exported", target.exists() and b"Partial delivery" in target.read_bytes())
+    check("exported mail is private", target.stat().st_mode & 0o777 == 0o600)
+    original = target.read_bytes()
+    save_button.emit("clicked")
+    check("export does not overwrite an existing file", target.read_bytes() == original)
+    reader.close()
+
+
+@step(600)
+def search_start(win):
+    from postroom.search import Query
+    win._start_search(Query("Lunch", "subject"), False)
+
+
+@step(600)
+def search_results(win):
+    check("server search uses existing message list", win._search is not None and bool(win.messages)
+          and all("Lunch" in m.subject for m in win.messages))
+    win._message_key(Gdk.KEY_Escape, 0)
+    check("Escape clears search", win._search is None)
+    check("clear search restores folder mail", any("Lunch" not in m.subject for m in win.messages))
+    from postroom.search import Query
+    win._start_search(Query("No such subject exists", "subject"), False)
+
+
+@step(600)
+def empty_search_results(win):
+    check("empty search has a focusable explanation", win.msg_stack.get_visible_child_name() == "empty")
+    win._message_key(Gdk.KEY_Escape, 0)
+    check("Escape clears even an empty search", win._search is None)
+    win.load_older()
+
+
+@step(600)
+def history_finished(win):
+    check("history command finishes and explains end", not win._loading_more and "No older messages remain" in win.status.get_text())
 
 
 @step(1200)

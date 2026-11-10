@@ -43,6 +43,7 @@ class Account:
     smtp_security: str = ""        # "ssl" or "starttls"; empty means by port (465 is ssl)
     auth: str = "password"         # "password" (app password) or "oauth2" (browser sign-in)
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    account_type: str = "auto"
 
     @property
     def login(self) -> str:

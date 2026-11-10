@@ -17,9 +17,12 @@ This follows the flow Thunderbird uses with an external browser:
 4. The refresh token is stored like a password. Access tokens last about an hour and are
    renewed from it silently.
 
-Mozilla registered Thunderbird's client IDs for Thunderbird. Using them would mean
-Postroom pretends to be Thunderbird, so they are not copied here. Each provider needs
-Postroom's own registration, read from ~/.config/postroom/oauth-clients.json:
+PRIVATE / EDUCATIONAL BUILD: THUNDERBIRD_CLIENTS below holds Mozilla's Thunderbird
+client IDs, copied from OAuth2Providers.sys.mjs. They are registered to Thunderbird, so
+sign-in pages name Thunderbird, and Mozilla or the provider may revoke them at any time.
+Remove them and use Postroom's own registrations before any public release.
+
+A registration in ~/.config/postroom/oauth-clients.json takes priority:
 
     {"accounts.google.com": {"client_id": "...", "client_secret": "..."},
      "login.microsoftonline.com": {"client_id": "..."}}
@@ -125,13 +128,32 @@ def clients_path():
     return config_dir() / "oauth-clients.json"
 
 
+# Thunderbird's built-in registrations (OAuth2Providers.sys.mjs). Private/educational use
+# only; see the module docstring. Fastmail's needs no secret, nor do Microsoft's, Yahoo's
+# or AOL's.
+THUNDERBIRD_CLIENTS = {
+    "accounts.google.com": Client(
+        "406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com",
+        "kSmqreRr0qwBWJgbf5Y-PjSU"),
+    "login.microsoftonline.com": Client("9e5f94bc-e8a4-4e73-b8be-63364c29d753"),
+    "login.yahoo.com": Client(
+        "dj0yJmk9WVZUaWRNUUZSQTBNJmQ9WVdrOVNqbHJUMGhtTkU4bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTgz"),
+    "login.aol.com": Client(
+        "dj0yJmk9MGNoTTQ0SjhIN1dSJmQ9WVdrOVdIVnFkVVp2UkZNbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTNm"),
+    "www.fastmail.com": Client("35f141ae"),
+}
+
+
 def client_for(issuer: Issuer) -> Client | None:
+    """The user's own registration from oauth-clients.json, else Thunderbird's."""
     try:
         data = json.loads(clients_path().read_text())
     except (OSError, ValueError):
-        return None
+        data = {}
     entry = data.get(issuer.name) or {}
-    return Client(entry["client_id"], entry.get("client_secret", "")) if entry.get("client_id") else None
+    if entry.get("client_id"):
+        return Client(entry["client_id"], entry.get("client_secret", ""))
+    return THUNDERBIRD_CLIENTS.get(issuer.name)
 
 
 class OAuthError(Exception):

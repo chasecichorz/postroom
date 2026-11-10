@@ -14,7 +14,7 @@ from postroom.config import Account, Config  # noqa: E402
 from tests.fake_imap import FakeClient  # noqa: E402
 
 session.ImapClient = FakeClient
-sending.send = lambda account, pw, msg: print("SENT:", msg["To"], "|", msg["Subject"], flush=True)
+sending.send = lambda account, pw, msg, **kwargs: print("SENT:", msg["To"], "|", msg["Subject"], flush=True)
 
 cfg = Config.load()
 if not cfg.accounts:

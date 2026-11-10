@@ -83,7 +83,9 @@ def standalone_window(win: Gtk.Window, parent: Gtk.Window) -> None:
     leave a floating window. An ordinary window tiles like any other, so Alt+Tab works.
     When it closes, the main window is brought back.
     """
-    win.connect("close-request", lambda *_: (parent.present(), False)[1])
+    win.connect("close-request", lambda *_: (parent.present() if parent.get_visible() else None, False)[1])
+    parent_handler = parent.connect("destroy", lambda *_: win.destroy())
+    win.connect("destroy", lambda *_: parent.disconnect(parent_handler))
 
 
 def focus_within(window: Gtk.Window, widget: Gtk.Widget) -> bool:
@@ -166,3 +168,33 @@ class TypeAhead:
                 select_and_focus(self.view, pos)
                 break
         return True
+
+
+def confirm(parent, message, detail, cancel_label, ok_label, on_ok):
+    """Ask in an ordinary tiled window, with the safe choice focused."""
+    win = Gtk.Window(title=message, default_width=440)
+    win.set_application(parent.get_application())
+    standalone_window(win, parent)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                  margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+    win.set_child(box)
+    box.append(Gtk.Label(label=detail, wrap=True, xalign=0))
+    buttons = Gtk.Box(spacing=12)
+    cancel = Gtk.Button(label=cancel_label, use_underline=True)
+    accept = Gtk.Button(label=ok_label, use_underline=True)
+    buttons.append(cancel)
+    buttons.append(accept)
+    box.append(buttons)
+    cancel.connect("clicked", lambda *_: win.close())
+
+    def accepted(*_):
+        win.close()
+        on_ok()
+    accept.connect("clicked", accepted)
+    keys = Gtk.EventControllerKey()
+    keys.connect("key-pressed", lambda _c, key, _code, state:
+                 (win.close(), True)[1] if key == Gdk.KEY_Escape and not mods(state) else False)
+    win.add_controller(keys)
+    cancel.grab_focus()
+    win.present()
+    return win

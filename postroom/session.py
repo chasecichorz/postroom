@@ -14,7 +14,7 @@ from gi.repository import GLib
 
 from . import carddav, contacts, credentials, oauth2, passwords, sending
 from .config import Account
-from .imap import NETWORK_ERRORS, ImapClient, ImapError
+from .imap import NETWORK_ERRORS, ImapClient, ImapError, uid_set
 from .models import Folder, Message
 from .store import Store
 
@@ -40,13 +40,15 @@ def _on_main(fn, *args):
 
 
 class AccountSession:
-    def __init__(self, account: Account, store: Store):
+    def __init__(self, account: Account, store: Store, draft_store=None):
         self.account = account
         self.store = store
+        self.draft_store = draft_store
         self.client: ImapClient | None = None
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=1,
                                                           thread_name_prefix=f"imap-{account.name}")
         self.folders: list[Folder] = []
+        self._jobs = []
 
     def submit(self, fn, *args, on_done=None, on_error=None):
         def job():
@@ -59,14 +61,17 @@ class AccountSession:
             else:
                 if on_done:
                     _on_main(on_done, result)
-        self.pool.submit(job)
+        self._jobs = [future for future in self._jobs if not future.done()]
+        self._jobs.append(self.pool.submit(job))
 
     def shutdown(self):
         def bye():
             if self.client:
                 self.client.close()
+        for future in self._jobs:
+            future.cancel()
         self.pool.submit(bye)
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        self.pool.shutdown(wait=False, cancel_futures=False)
 
     # -- runs on the worker thread ----------------------------------------------------------
     def _client(self) -> ImapClient:
@@ -74,13 +79,16 @@ class AccountSession:
             self.client = ImapClient(self.account, lambda: credentials.secret(self.account))
         return self.client
 
-    def _run(self, op):
+    def _run(self, op, retry=True):
         """Run op(client); on a dropped connection, reconnect once and retry."""
         c = self._client()
         try:
             return op(c)
         except NETWORK_ERRORS:
             c.close()
+            if not retry:
+                raise ImapError("The connection was lost. The operation may have completed; "
+                                "refresh the folder before trying again.")
             return op(c)
 
     def list_folders(self) -> list[Folder]:
@@ -123,9 +131,47 @@ class AccountSession:
                     changed = True
                 changed |= self.store.update_flags(acct, path, flags) > 0
             self.store.upsert(new)
-            self.store.trim(acct, path, WINDOW)
+            self.store.trim(acct, path, max(WINDOW, int(self.store.meta(f"history:{acct}:{path}") or 0)))
             self._harvest(path, new)
             return SyncResult(new, changed or bool(new), first=not cached)
+        return self._run(op)
+
+    def load_older(self, path: str, limit=500):
+        acct = self.account.id
+        def op(c):
+            _exists, validity = c.select(path)
+            if self.store.uidvalidity(acct, path) != validity:
+                self.store.reset_folder(acct, path, validity)
+            cached = self.store.uids(acct, path)
+            before = cached[0] if cached else None
+            criteria = f"UID 1:{before - 1}".encode() if before and before > 1 else b"ALL"
+            candidates = [] if before == 1 else c.search_uids(path, criteria)
+            candidates = [u for u in candidates if before is None or u < before]
+            chosen = candidates[-limit:]
+            messages = c.fetch_headers(path, uid_set(chosen), by_uid=True) if chosen else []
+            self.store.upsert(messages)
+            self.store.set_meta(f"history:{acct}:{path}", str(max(WINDOW, len(cached) + len(messages))))
+            return len(messages), len(candidates) > len(chosen)
+        return self._run(op)
+
+    def search(self, path, query, before=None, offline=False, limit=500):
+        if offline:
+            messages = [m for m in self.store.messages(self.account.id, path)
+                        if (before is None or m.uid < before) and
+                        query.matches(m, self.store.body(self.account.id, path, m.uid))]
+            messages.sort(key=lambda m: m.uid)
+            return messages[-limit:], len(messages) > limit
+        def op(c):
+            _exists, validity = c.select(path)
+            if self.store.uidvalidity(self.account.id, path) != validity:
+                self.store.reset_folder(self.account.id, path, validity)
+            uids = c.search_uids(path, query.criteria())
+            if before is not None:
+                uids = [u for u in uids if u < before]
+            chosen = uids[-limit:]
+            messages = c.fetch_headers(path, uid_set(chosen), by_uid=True) if chosen else []
+            # Search results must not create gaps in the normal folder cache.
+            return messages, len(uids) > limit
         return self._run(op)
 
     # -- address book -----------------------------------------------------------------------
@@ -202,34 +248,61 @@ class AccountSession:
         self._run(lambda c: c.set_flags(path, uids, flag, on))
 
     def move(self, path: str, uids: list[int], dest: str) -> None:
-        self._run(lambda c: c.move(path, uids, dest))
+        self._run(lambda c: c.move(path, uids, dest), retry=False)
         self.store.delete(self.account.id, path, uids)
 
     def delete_forever(self, path: str, uids: list[int]) -> None:
-        self._run(lambda c: c.delete_forever(path, uids))
+        self._run(lambda c: c.delete_forever(path, uids), retry=False)
         self.store.delete(self.account.id, path, uids)
 
-    def send(self, draft: sending.Draft) -> None:
+    def send(self, draft: sending.Draft) -> sending.SendResult:
         try:
             pw = credentials.secret(self.account)
         except credentials.CredentialError as e:
             raise sending.SendError(str(e)) from e
         msg = sending.build(self.account, draft)
-        sending.send(self.account, pw, msg)
-        # Gmail files sent mail by itself; other servers need a copy in Sent.
+        try:
+            result = sending.send(self.account, pw, msg, to_addrs=draft.pending_recipients)
+        except sending.DeliveryUncertain:
+            draft.delivery_state = "uncertain"
+            if self.draft_store:
+                try:
+                    self.draft_store.save(self.account.id, draft)
+                except Exception:
+                    log.exception("saving uncertain delivery state failed")
+            raise
+        if result is None:  # compatibility with simple test transports
+            result = sending.SendResult([a for _, a in sending._addresses(draft.to + "," + draft.cc)])
+        raw = msg.as_bytes()
+        draft.pending_recipients = result.refused or []
+        draft.delivery_state = "partial" if result.refused else "sent"
+        if result.refused:
+            refused = {a.casefold() for a in result.refused}
+            draft.to = sending._fmt([(n, a) for n, a in sending._addresses(draft.to) if a.casefold() in refused])
+            draft.cc = sending._fmt([(n, a) for n, a in sending._addresses(draft.cc) if a.casefold() in refused])
+        if self.draft_store:
+            try:
+                self.draft_store.accepted(self.account.id, draft, raw, result.accepted)
+            except Exception:
+                log.exception("saving local sent copy failed")
+                result.warning = "Mail was accepted, but saving its local delivery record failed. Check Sent before retrying."
         if not self.account.is_gmail:
             sent = next((f for f in self.folders if f.special == "sent"), None)
             if sent:
                 try:
-                    self._run(lambda c: c.append(sent.path, msg.as_bytes()))
-                except Exception:  # noqa: BLE001 - the mail went out; the copy is a nicety
+                    self._run(lambda c: c.append(sent.path, raw), retry=False)
+                except Exception:
                     log.exception("saving to Sent failed")
-        if draft.reply_source:
+                    result.warning += " Mail was accepted, but its Sent folder copy could not be confirmed."
+            else:
+                result.warning += " Mail was accepted, but this account has no Sent folder."
+        if draft.reply_source and draft.reply_source[0] == self.account.id:
             _acct, folder, uid = draft.reply_source
             try:
                 self._run(lambda c: c.set_flags(folder, [uid], "\\Answered", True))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("marking answered failed")
+        return result
 
 
 def check_login(account: Account, password: str) -> None:

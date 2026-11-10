@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+/src/
+/pkg/
+/*.pkg.tar.*
+/postroom-*.tar.gz
+/ui-check.log

@@ -282,6 +282,14 @@ class ImapClient:
                 out.append(msg)
         return out
 
+    def search_uids(self, folder: str, criteria: bytes = b"ALL") -> list[int]:
+        c = self._c()
+        self.ensure_selected(folder)
+        # Bytes let imaplib transmit UTF-8 search text without ASCII re-encoding.
+        charset = ("CHARSET", "UTF-8") if not criteria.isascii() else ()
+        data = self._ok(c.uid("SEARCH", *charset, criteria), "Searching messages")
+        return sorted({int(u) for line in data if isinstance(line, bytes) for u in line.split()})
+
     def fetch_flags(self, folder: str, uid_set: str) -> dict[int, set[str]]:
         c = self._c()
         self.ensure_selected(folder)
@@ -315,6 +323,9 @@ class ImapClient:
         if "MOVE" in self.caps:
             self._ok(c.uid("MOVE", s, quote(dest)), "Moving")
         else:
+            if "UIDPLUS" not in self.caps:
+                raise ImapError("This server cannot safely move individual messages. "
+                                "MOVE or UIDPLUS support is required.")
             self._ok(c.uid("COPY", s, quote(dest)), "Copying")
             self._ok(c.uid("STORE", s, "+FLAGS.SILENT", "(\\Deleted)"), "Deleting")
             self._expunge(s)
@@ -323,6 +334,9 @@ class ImapClient:
         c = self._c()
         self.ensure_selected(folder)
         s = uid_set(uids)
+        if "UIDPLUS" not in self.caps:
+            raise ImapError("This server cannot safely delete individual messages permanently. "
+                            "UIDPLUS support is required.")
         self._ok(c.uid("STORE", s, "+FLAGS.SILENT", "(\\Deleted)"), "Deleting")
         self._expunge(s)
 
@@ -331,7 +345,7 @@ class ImapClient:
         if "UIDPLUS" in self.caps:
             self._ok(c.uid("EXPUNGE", s), "Expunging")
         else:
-            self._ok(c.expunge(), "Expunging")
+            raise ImapError("Refusing to expunge unrelated messages without UIDPLUS.")
 
     def append(self, folder: str, raw: bytes, flags: str = "(\\Seen)") -> None:
         self._ok(self._c().append(quote(folder), flags, imaplib.Time2Internaldate(time.time()), raw),

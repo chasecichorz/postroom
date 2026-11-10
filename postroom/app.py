@@ -10,11 +10,13 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, Gtk  # noqa: E402
 
 from .config import APP_ID, APP_NAME, Config, cache_dir, config_dir  # noqa: E402
+from .drafts import DraftStore
 from .store import Store  # noqa: E402
-from .ui.common import install_css  # noqa: E402
+from .ui.common import install_css, standalone_window  # noqa: E402
 
 ACCELS = {
     "win.compose": ["<Control>n"],
+    "win.search": ["<Control>f"],
     "win.reply": ["<Control>r"],
     "win.reply-all": ["<Control><Shift>r"],
     "win.forward": ["<Control><Shift>f"],
@@ -64,13 +66,14 @@ class PostroomApp(Gtk.Application):
         self.window = None
         self.cfg = Config.load()
         self.store = Store(cache_dir() / "cache.db")
+        self.drafts = DraftStore(config_dir() / "drafts.db")
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
         install_css()
         for action, accels in ACCELS.items():
             self.set_accels_for_action(action, accels)
-        for name, fn in (("quit", self.quit), ("about", self._about)):
+        for name, fn in (("quit", self._quit), ("about", self._about)):
             a = Gio.SimpleAction.new(name, None)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)
@@ -78,16 +81,18 @@ class PostroomApp(Gtk.Application):
         self.message_menu_model = _menu(MESSAGE_SECTIONS)
         bar = Gio.Menu()
         bar.append_submenu("_File", _menu([
-            [("_New Message", "win.compose")],
+            [("_New Message", "win.compose"), ("_Saved Drafts…", "win.saved-drafts"),
+             ("_Local Sent Copies…", "win.local-sent")],
             [("_Add Account…", "win.add-account"), ("_Edit Account…", "win.edit-account"),
              ("_Remove Account…", "win.remove-account")],
             [("Update _Contacts from Google", "win.update-contacts")],
             [("_Quit", "app.quit")]]))
         bar.append_submenu("_Message", _menu(MESSAGE_SECTIONS))
         view = _menu([
-            [("_Check for Mail", "win.refresh")],
-            [("Group into _Conversations", "win.conversations"),
-             ("Read the _Formatted Version", "win.prefer-html")],
+            [("_Check for Mail", "win.refresh"), ("_Load Older Messages", "win.load-older")],
+            [("_Find Messages…", "win.search"), ("Clear S_earch", "win.clear-search")],
+            [("_Group into Conversations", "win.conversations"),
+             ("Read the Formatted _Version", "win.prefer-html")],
             [("Play a Sou_nd for New Mail", "win.new-mail-sound"),
              ("Sa_y Who New Mail Is From", "win.new-mail-announce")],
             [("Next _Unread Message", "win.next-unread"),
@@ -108,10 +113,18 @@ class PostroomApp(Gtk.Application):
         if not self.cfg.accounts:
             self.window.add_account()
 
+    def _quit(self):
+        if self.window is not None and not self.window.prepare_close():
+            return
+        if self.window is not None:
+            self.window.close()
+        self.quit()
+
     def _about(self):
-        Gtk.AboutDialog(transient_for=self.window, modal=True, program_name=APP_NAME,
-                        comments="A keyboard-first email client, laid out like QuickMail.",
-                        license_type=Gtk.License.MIT_X11).present()
+        about = Gtk.AboutDialog(program_name=APP_NAME,
+                                comments="A keyboard-first email client, laid out like QuickMail.")
+        standalone_window(about, self.window)
+        about.present()
 
 
 def main(argv=None) -> int:

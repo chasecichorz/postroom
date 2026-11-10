@@ -135,7 +135,9 @@ Enter in the message list: read the message in the reading pane
 Escape in the reading pane: back to the message list
 
 Messages
-Ctrl+N: new message
+Ctrl+N: new message. File, Saved Drafts: resume an unfinished message
+Ctrl+F: search this folder. Escape in the results list: clear search
+View, Load Older Messages: download earlier messages or more search results
 Ctrl+R: reply.  Ctrl+Shift+R: reply all.  Ctrl+Shift+F: forward
 Delete: delete (move to Trash).  Ctrl+Shift+M: archive
 Ctrl+Q: mark as read.  Ctrl+U: mark as unread.  K: star or unstar
@@ -148,7 +150,8 @@ Compose window
 Alt+M: From.  Alt+T: To.  Alt+C: Cc.  Alt+U: Subject.  Alt+Y: message body
 Alt+A: attach a file
 F6 / Shift+F6: move between fields
-Ctrl+Enter or Alt+S: send.  Escape: close (asks before discarding)
+Ctrl+S: save draft. Ctrl+Enter or Alt+S: send
+Escape: save draft and close. Discard button: delete draft after confirmation
 """
 
 
@@ -166,3 +169,106 @@ class ShortcutsWindow(Gtk.Window):
                    if kv == Gdk.KEY_Escape and not mods(s) else False)
         self.add_controller(kc)
         view.grab_focus()
+
+
+class SearchWindow(Gtk.Window):
+    """A separate search form; results use the existing message pane."""
+    def __init__(self, parent, on_search):
+        super().__init__(title="Search Messages", default_width=500)
+        standalone_window(self, parent)
+        self.on_search = on_search
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin_top=12,
+                        margin_bottom=12, margin_start=12, margin_end=12)
+        self.set_child(grid)
+        self.text = Gtk.Entry(hexpand=True)
+        self.field = Gtk.DropDown.new_from_strings(['All headers and body', 'Sender', 'Recipient', 'Subject', 'Body'])
+        self.scope = Gtk.DropDown.new_from_strings(['Server: all mail in this folder', 'Downloaded mail on this computer'])
+        self.since = Gtk.Entry(placeholder_text='YYYY-MM-DD')
+        self.before = Gtk.Entry(placeholder_text='YYYY-MM-DD')
+        for i, (label, widget) in enumerate((('Search _text', self.text), ('_Look in', self.field),
+                ('Search _on', self.scope), ('_Since date (inclusive)', self.since),
+                ('_Before date (exclusive)', self.before))):
+            grid.attach(Gtk.Label(label=label, use_underline=True, mnemonic_widget=widget, xalign=0), 0, i, 1, 1)
+            set_label(widget, label.replace('_', ''))
+            grid.attach(widget, 1, i, 1, 1)
+        self.unread = Gtk.CheckButton(label='_Unread only', use_underline=True)
+        self.starred = Gtk.CheckButton(label='S_tarred only', use_underline=True)
+        grid.attach(self.unread, 1, 5, 1, 1)
+        grid.attach(self.starred, 1, 6, 1, 1)
+        self.error = Gtk.Label(wrap=True, xalign=0)
+        grid.attach(self.error, 0, 7, 2, 1)
+        help_text = Gtk.Label(label='Search the current folder. Offline search uses cached headers and downloaded bodies. '
+                             'Escape on the results list clears the search.', wrap=True, xalign=0)
+        grid.attach(help_text, 0, 8, 2, 1)
+        button = Gtk.Button(label='_Search', use_underline=True)
+        button.connect('clicked', self._search)
+        grid.attach(button, 1, 9, 1, 1)
+        self.text.connect('activate', self._search)
+        keys = Gtk.EventControllerKey()
+        keys.connect('key-pressed', lambda _c, k, _code, state:
+                     (self.close(), True)[1] if k == Gdk.KEY_Escape and not mods(state) else False)
+        self.add_controller(keys)
+        self.text.grab_focus()
+
+    def _search(self, *_):
+        from ..search import Query
+        query = Query(self.text.get_text(), ['text', 'from', 'to', 'subject', 'body'][self.field.get_selected()],
+                      self.unread.get_active(), self.starred.get_active(),
+                      self.since.get_text().strip(), self.before.get_text().strip())
+        try:
+            query.criteria()
+        except ValueError as exc:
+            self.error.set_text(str(exc))
+            announce(self, str(exc), True)
+            return
+        offline = self.scope.get_selected() == 1
+        self.close()
+        self.on_search(query, offline)
+
+
+class LocalSentWindow(Gtk.Window):
+    def __init__(self, parent, copy_id, raw, accepted):
+        from pathlib import Path
+        from ..mime import parse
+        pm = parse(raw)
+        super().__init__(title=pm.subject or 'Local Sent Copy', default_width=700, default_height=550)
+        standalone_window(self, parent)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=12,
+                      margin_bottom=12, margin_start=12, margin_end=12)
+        self.set_child(box)
+        body = Gtk.TextView(editable=False, cursor_visible=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        set_label(body, 'Local sent message')
+        body.get_buffer().set_text(f'Accepted by the sending server for: {", ".join(accepted)}\n'
+                                  f'From: {pm.from_}\nTo: {pm.to}\nCc: {pm.cc}\n'
+                                  f'Subject: {pm.subject}\nDate: {pm.date}\n\n{pm.text}')
+        box.append(Gtk.ScrolledWindow(child=body, vexpand=True))
+        path = Gtk.Entry(text=str(Path.home() / f'postroom-sent-{copy_id}.eml'))
+        label = Gtk.Label(label='Save copy to _file', use_underline=True, mnemonic_widget=path, xalign=0)
+        set_label(path, 'Save copy to file')
+        box.append(label)
+        box.append(path)
+        status = Gtk.Label(wrap=True, xalign=0)
+        box.append(status)
+        save = Gtk.Button(label='_Save Copy', use_underline=True)
+        box.append(save)
+        def write(*_):
+            import os
+            destination = Path(path.get_text()).expanduser()
+            try:
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(raw)
+            except FileExistsError:
+                text = 'That file already exists. Choose another name.'
+            except OSError:
+                text = 'Could not save the copy. Check the directory and available disk space.'
+            else:
+                text = 'Message copy saved, including its attachments.'
+            status.set_text(text)
+            announce(self, text, True)
+        save.connect('clicked', write)
+        keys = Gtk.EventControllerKey()
+        keys.connect('key-pressed', lambda _c, key, _code, state:
+                     (self.close(), True)[1] if key == Gdk.KEY_Escape and not mods(state) else False)
+        self.add_controller(keys)
+        body.grab_focus()

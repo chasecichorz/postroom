@@ -3,7 +3,7 @@
 A keyboard-first Linux email client laid out like Kelly Ford's
 [QuickMail](https://github.com/kellylford/QuickMail): accounts and folders on the left,
 messages and the reading pane on the right, and everything reachable from the keyboard.
-Built with GTK 4 and Python, and designed for use with the Orca screen reader.
+Built with GTK 4 and Python, and designed for Cthulhu and other AT-SPI screen readers.
 
 ## Running it
 
@@ -14,7 +14,11 @@ Built with GTK 4 and Python, and designed for use with the Orca screen reader.
 It needs Python 3, GTK 4, PyGObject and libsecret, which are all standard on Arch
 (`gtk4 python-gobject libsecret`). Nothing else has to be installed.
 
-The first time it starts, the Add Account window opens. For Gmail:
+The first time it starts, the Add Account window opens. The Account type combo box
+offers Find from email address, Gmail, Outlook / Microsoft 365, Yahoo, AOL, Fastmail,
+iCloud, and Other. Other lets you enter custom IMAP and SMTP servers. Provider
+selection supplies server discovery defaults; it does not change the account’s
+authentication method or create an OAuth registration. For Gmail:
 
 1. Turn on two-step verification for your Google account if it isn't on already.
 2. Create an app password at <https://myaccount.google.com/apppasswords>.
@@ -41,11 +45,12 @@ Then either:
   and Alt+W shows it if you want to check it.
 - **Sign in with browser** (Alt+B): Postroom opens your provider's sign-in page in your web
   browser. You sign in there, the browser hands Postroom a one-time code on 127.0.0.1, and
-  Postroom keeps a refresh token in place of a password. Works for Gmail, Outlook and
-  Microsoft 365, Yahoo, AOL and Fastmail.
+  Postroom keeps a refresh token in place of a password. Available for providers whose registration supports Postroom’s local callback.
+  Yahoo and AOL currently need app passwords.
 
-Browser sign-in needs Postroom's own registration with each provider. Mozilla's
-registrations belong to Thunderbird, and Postroom must not borrow them. Put the client IDs in
+This private build falls back to Thunderbird's registrations for Google, Microsoft and
+Fastmail, so the sign-in page names Thunderbird. Those IDs belong to Mozilla and may stop
+working at any time. To use your own registrations instead, put the client IDs in
 `~/.config/postroom/oauth-clients.json`:
 
 ```json
@@ -53,7 +58,7 @@ registrations belong to Thunderbird, and Postroom must not borrow them. Put the 
  "login.microsoftonline.com": {"client_id": "…"}}
 ```
 
-Until a provider has an entry, its accounts use app passwords.
+An entry there takes priority over the built-in IDs.
 
 ## New mail
 
@@ -131,7 +136,73 @@ These match QuickMail's wherever QuickMail has the same command.
 | Shift+F10 or Menu | Message actions |
 
 In the compose window: Alt+T To, Alt+C Cc, Alt+U Subject, Alt+Y body, Alt+A attach,
-Ctrl+Enter or Alt+S send, and Escape to close (it asks before throwing away your text).
+Ctrl+S save draft, Ctrl+Enter or Alt+S send, and Escape save the draft and close.
+The Discard button asks before deleting your saved draft.
+
+## Drafts and sending
+
+Postroom automatically saves unfinished messages on this computer after a short
+pause in editing. To resume one, use File, Saved Drafts. The saved copy includes
+attachments, From account, reply headers and the body cursor position. Ctrl+S
+saves immediately; Escape saves and closes. Closing the main window saves open
+composers; quitting waits for any send in progress. Discard explicitly removes a
+draft after confirmation. Drafts currently stay local rather than synchronizing
+to your provider's Drafts folder.
+
+If the server accepts only some recipients, Postroom tells you which ones and
+leaves only the rejected recipients in the draft for retry. If the connection
+fails during sending, delivery may be uncertain: check Sent and the recipients
+before choosing Send Again. Postroom never retries SMTP delivery automatically.
+
+File, Local Sent Copies lets you read or save an .eml copy of messages accepted by
+the sending server, including attachments. The copy identifies the accepted
+recipients; acceptance does not guarantee final delivery to their inboxes. A
+failure to file the server's Sent copy is reported separately from delivery.
+
+## Search and older mail
+
+Ctrl+F or View, Find Messages opens a separate search window for the current
+folder. Search sender, To/Cc recipients, subject, body, or headers and body together.
+You can restrict it to unread or starred mail and supply dates as YYYY-MM-DD.
+Since includes that day; Before excludes it. Server search covers the folder's
+mail, including messages outside the cache. Downloaded-mail search uses cached
+headers and bodies already opened on this computer; it cannot search bodies
+that have not been downloaded.
+
+Results appear in the existing message list. Escape in that list or View, Clear
+Search restores the folder and its earlier selection. View, Load Older Messages
+loads the next 500 earlier messages, or another page of search results. Deliberate
+history loading increases the folder's cache allowance so routine refreshes keep
+that larger history window. No extra controls are added to the main Tab order.
+
+## Arch package
+
+From this repository, make a source snapshot and build a local package:
+
+```sh
+python3 packaging/make_source.py
+makepkg
+```
+
+The snapshot includes only application source, fake-data tests, documentation,
+license notices and the launcher/desktop entry. It includes uncommitted source
+changes but no user configuration, tokens, mail caches or debug logs. The snapshot
+script updates PKGBUILD's SHA-256 checksum. Regenerate it after editing source.
+`makepkg` runs the unit and hidden-display smoke tests; test dependencies include
+Xvfb, xauth, xdotool and D-Bus. Install the resulting package with:
+
+```sh
+sudo pacman -U postroom-0.2.0-1-any.pkg.tar.zst
+```
+
+The package installs /usr/bin/postroom and a desktop entry. If you keep a checkout
+launcher at ~/.local/bin/postroom, your PATH may still choose it first; `type -a
+postroom` shows both. Use /usr/bin/postroom to run the packaged version explicitly.
+Your current settings remain in the same per-user location.
+
+This is a private build. `postroom/oauth2.py` falls back to Thunderbird's OAuth
+client IDs for educational use. Replace them with Postroom's own registrations
+before publishing the source or a package.
 
 ## Tests
 
@@ -140,8 +211,10 @@ python3 -m unittest tests.test_core                                # mail, cache
 python3 -m unittest tests.test_accounts                            # finding servers, browser sign-in
 python3 -m unittest tests.test_contacts                            # address book, Google contacts
 python3 -m unittest tests.test_background                          # checking while closed
+python3 -m unittest tests.test_readiness tests.test_ui_guards       # drafts, sending, search, history and guards
 xvfb-run -a dbus-run-session -- python3 -m tests.completion_probe  # what To suggestions say
 xvfb-run -a dbus-run-session -- python3 -m tests.ui_smoke          # the window, on a hidden screen
+xvfb-run -a dbus-run-session -- python3 -m tests.menu_probe        # asserted real-key menu checks
 xvfb-run -a dbus-run-session -- python3 -m tests.a11y_probe        # what a screen reader is told
 python3 -m tests.fake_app                                          # try it with a pretend account
 ```
@@ -149,12 +222,23 @@ python3 -m tests.fake_app                                          # try it with
 ## Files
 
 - `~/.config/postroom/config.json`: accounts and settings
-- `~/.cache/postroom/cache.db`: local copy of the newest 1000 messages per folder, for speed
+- `~/.config/postroom/drafts.db`: private local drafts, attachments and accepted-mail copies
+- `~/.cache/postroom/cache.db`: local headers (initially 500, normally up to 1000 per folder; expanded when you load older mail) and recently opened bodies
 - `~/.cache/postroom/postroom.log`: log, useful when something goes wrong
 
 ## Licenses
+
+Postroom is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version. See
+[LICENSES/GPL-3.0-or-later.txt](LICENSES/GPL-3.0-or-later.txt).
 
 `postroom/autoconfig.py` and `postroom/oauth2.py` are ported from Thunderbird's account
 setup and OAuth code and stay under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/),
 as that license requires. Thunderbird's source is at
 <https://github.com/thunderbird/thunderbird-desktop>.
+
+## Development priorities
+
+See [ROADMAP.md](ROADMAP.md) for the code review, remaining features, accessibility
+acceptance checks, and release blockers.

@@ -18,6 +18,11 @@ os.environ.pop("NO_AT_BRIDGE", None)
 
 KEYS = [
     ("start", None),
+    ("F10 menu", "F10"), ("Down menu", "Down"),
+    ("Right menu", "Right"), ("Down menu", "Down"),
+    ("Escape submenu", "Escape"), ("Escape menu bar", "Escape"),
+    ("Shift+F10 context", "shift+F10"), ("Down context", "Down"),
+    ("Escape context", "Escape"),
     ("Down", "Down"), ("Down", "Down"), ("Up", "Up"), ("Up", "Up"),
     ("Right (expand)", "Right"), ("Right (into)", "Right"), ("Down", "Down"),
     ("Left (parent)", "Left"), ("Left (collapse)", "Left"),
@@ -30,6 +35,11 @@ KEYS = [
     ("Ctrl+N compose", "ctrl+n"), ("Tab", "Tab"), ("Alt+U subject", "alt+u"),
     ("Escape (close)", "Escape"),
     ("Ctrl+9 status", "ctrl+9"),
+    ("Ctrl+F search", "ctrl+f"), ("Escape search", "Escape"),
+    ("File menu", "alt+f"), ("Add Account", "a"),
+    ("Account type", "alt+t"), ("Open account type", "space"),
+    ("Next account type", "Down"), ("Choose type", "Return"),
+    ("Close account setup", "Escape"),
 ]
 
 log: list[str] = []

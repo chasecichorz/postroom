@@ -117,12 +117,35 @@ class FakeClient:
     def fetch_headers(self, path, msg_set, by_uid):
         uids = sorted(self.mb.folders[path])
         if by_uid:
-            lo = int(msg_set.split(":")[0])
-            sel = [u for u in uids if u >= lo] or uids[-1:]
+            sel = set()
+            for part in msg_set.split(','):
+                if ':' in part:
+                    left, right = part.split(':')
+                    lo, hi = int(left), (max(uids, default=0) if right == '*' else int(right))
+                    lo, hi = sorted((lo, hi))
+                    sel.update(u for u in uids if lo <= u <= hi)
+                elif int(part) in uids:
+                    sel.add(int(part))
+            sel = sorted(sel)
         else:
             a, b = (int(x) for x in msg_set.split(":"))
             sel = uids[a - 1:b]
         return self._headers(path, sel)
+
+    def search_uids(self, path, criteria=b"ALL"):
+        uids = sorted(self.mb.folders[path])
+        if criteria.startswith(b"UID 1:"):
+            top = int(criteria.split(b":")[1])
+            return [u for u in uids if u <= top]
+        if criteria == b"ALL":
+            return uids
+        from postroom.search import Query
+        # A small parser for the subset exercised by UI smoke tests.
+        text = criteria.decode('utf-8')
+        if text.startswith('SUBJECT "'):
+            query = Query(text[len('SUBJECT "'):-1], 'subject')
+            return [m.uid for m in self._headers(path, uids) if query.matches(m)]
+        return uids
 
     def fetch_flags(self, path, uid_set):
         return {u: set(f) for u, (_, f) in self.mb.folders[path].items()}

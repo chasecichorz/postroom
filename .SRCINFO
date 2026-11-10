@@ -1,0 +1,25 @@
+pkgbase = postroom
+	pkgdesc = Accessible keyboard-first GTK email client
+	pkgver = 0.2.0
+	pkgrel = 1
+	arch = any
+	license = GPL-3.0-or-later
+	license = MPL-2.0
+	checkdepends = xorg-server-xvfb
+	checkdepends = xorg-xauth
+	checkdepends = xdotool
+	checkdepends = dbus
+	checkdepends = at-spi2-core
+	depends = python
+	depends = python-gobject
+	depends = gtk4>=4.24
+	depends = libsecret
+	optdepends = speech-dispatcher: spoken background mail notifications
+	optdepends = libnotify: desktop background mail notifications
+	optdepends = pipewire-audio: new-mail sound through pw-play
+	optdepends = libpulse: alternative new-mail sound through paplay
+	optdepends = alsa-utils: alternative new-mail sound through aplay
+	source = postroom-0.2.0.tar.gz
+	sha256sums = 4e73a75a72b5d610a6cb4b49578499e655dd782229aec1ce8626c5f7c66dbe93
+
+pkgname = postroom

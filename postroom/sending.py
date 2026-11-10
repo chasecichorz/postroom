@@ -4,6 +4,7 @@ from __future__ import annotations
 import mimetypes
 import smtplib
 import ssl
+import uuid
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
@@ -14,6 +15,17 @@ from .mime import Attachment, ParsedMessage
 
 class SendError(Exception):
     pass
+
+
+class DeliveryUncertain(SendError):
+    """The connection failed after delivery may have begun; never retry automatically."""
+
+
+@dataclass
+class SendResult:
+    accepted: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)
+    warning: str = ""
 
 
 @dataclass
@@ -27,6 +39,10 @@ class Draft:
     attachments: list[Attachment] = field(default_factory=list)
     # The message being replied to, so it can be marked as answered after sending.
     reply_source: tuple | None = None
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    message_id: str = ""
+    delivery_state: str = "draft"
+    pending_recipients: list[str] | None = None
 
 
 def _addresses(value: str) -> list[tuple[str, str]]:
@@ -77,6 +93,8 @@ def forward(pm: ParsedMessage) -> Draft:
 
 def validate(draft: Draft) -> str | None:
     """Return a problem to tell the user about, or None if the draft can be sent."""
+    if any("\r" in value or "\n" in value for value in (draft.to, draft.cc, draft.subject)):
+        return "Recipient and subject fields must each be on one line."
     recipients = _addresses(draft.to) + _addresses(draft.cc)
     if not recipients:
         return "Add at least one recipient in To or Cc."
@@ -94,7 +112,9 @@ def build(account: Account, draft: Draft) -> EmailMessage:
         msg["Cc"] = _fmt(_addresses(draft.cc))
     msg["Subject"] = draft.subject
     msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=account.email.rpartition("@")[2] or None)
+    if not draft.message_id:
+        draft.message_id = make_msgid(domain=account.email.rpartition("@")[2] or None)
+    msg["Message-ID"] = draft.message_id
     if draft.in_reply_to:
         msg["In-Reply-To"] = draft.in_reply_to
     if draft.references:
@@ -110,25 +130,35 @@ def build(account: Account, draft: Draft) -> EmailMessage:
     return msg
 
 
-def send(account: Account, password: str, msg: EmailMessage) -> None:
+def send(account: Account, password: str, msg: EmailMessage,
+         to_addrs: list[str] | None = None) -> SendResult:
     """Send `msg`. `password` is the app password, or the access token for a browser
     sign-in account."""
     ctx = ssl.create_default_context()
+    server = None
+    delivering = False
+    recipients = list(dict.fromkeys(to_addrs if to_addrs is not None else
+                                   [a for _, a in _addresses(str(msg.get("To", ""))) +
+                                    _addresses(str(msg.get("Cc", "")))]))
+    if not recipients:
+        raise SendError("Add at least one recipient.")
     try:
         if account.smtp_uses_ssl:
             server = smtplib.SMTP_SSL(account.smtp_host, account.smtp_port, context=ctx, timeout=60)
         else:
             server = smtplib.SMTP(account.smtp_host, account.smtp_port, timeout=60)
             server.starttls(context=ctx)
-        with server:
-            if account.auth == "oauth2":
-                from .oauth2 import xoauth2
-                server.ehlo()
-                server.auth("XOAUTH2", lambda challenge=None: xoauth2(account.login, password),
-                            initial_response_ok=True)
-            else:
-                server.login(account.login, password)
-            server.send_message(msg)
+        if account.auth == "oauth2":
+            from .oauth2 import xoauth2
+            server.ehlo()
+            server.auth("XOAUTH2", lambda challenge=None: xoauth2(account.login, password),
+                        initial_response_ok=True)
+        else:
+            server.login(account.login, password)
+        delivering = True
+        refused = server.send_message(msg, to_addrs=recipients)
+        rejected = {a.casefold() for a in refused}
+        return SendResult([a for a in recipients if a.casefold() not in rejected], list(refused))
     except smtplib.SMTPAuthenticationError as e:
         if account.auth == "oauth2":
             from .credentials import invalidate
@@ -137,6 +167,20 @@ def send(account: Account, password: str, msg: EmailMessage) -> None:
                             "keeps failing, sign in again in Edit Account.") from e
         raise SendError("Sign-in to the mail server failed. Check the app password.") from e
     except smtplib.SMTPRecipientsRefused as e:
-        raise SendError("The server refused these recipients: " + ", ".join(e.recipients)) from e
-    except (smtplib.SMTPException, OSError) as e:
+        raise SendError("No recipients accepted. The server refused: " + ", ".join(e.recipients)) from e
+    except smtplib.SMTPResponseException as e:
+        raise SendError(f"The server refused the message (SMTP {e.smtp_code}). It was not accepted.") from e
+    except (smtplib.SMTPServerDisconnected, OSError) as e:
+        if delivering:
+            raise DeliveryUncertain("Delivery could not be confirmed. Check Sent and ask the recipients "
+                                    "before retrying; sending again could create duplicates.") from e
+        raise SendError("Could not connect or sign in to the sending server. Try again later.") from e
+    except smtplib.SMTPException as e:
         raise SendError(f"Sending failed: {e}") from e
+    finally:
+        if server is not None:
+            # A failed QUIT after SMTP acceptance must never turn success into a retry.
+            try:
+                server.close()
+            except OSError:
+                pass

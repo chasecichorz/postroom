@@ -106,6 +106,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.cfg = app.cfg
         self.store = app.store
         self.sessions: dict[str, AccountSession] = {}
+        self.composers = {}
+        self._deferred_accounts = {}
+        self._search = None
+        self._search_generation = 0
+        self._search_return_key = None
+        self._loading_more = False
         self.account: Account | None = None
         self.folder: Folder | None = None
         self.tree: list[FolderNode] = []
@@ -125,6 +131,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._build_shortcuts()
         self.connect("close-request", self._on_close)
         self._reload_accounts()
+        GLib.timeout_add(1500, self._announce_drafts)
         GLib.timeout_add_seconds(max(1, self.cfg.settings.check_minutes) * 60, self._periodic_check)
 
     # ===== construction =====================================================================
@@ -183,6 +190,7 @@ class MainWindow(Gtk.ApplicationWindow):
                                        lambda row: row.get_item().message.sender)
         self._keys(self.msg_view, self._message_key)
         self.msg_empty = Gtk.Label(label="Loading…", selectable=True, vexpand=True)
+        self._keys(self.msg_empty, self._message_key)
         self.msg_stack = Gtk.Stack()
         sw = Gtk.ScrolledWindow(child=self.msg_view, vexpand=True)
         self.msg_stack.add_named(sw, "list")
@@ -257,7 +265,9 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _build_actions(self):
         simple = {
-            "compose": self.compose_new, "reply": lambda: self.reply(False),
+            "compose": self.compose_new, "saved-drafts": self.show_drafts,
+            "local-sent": self.show_local_sent,
+            "search": self.show_search, "clear-search": self.clear_search, "load-older": self.load_older, "reply": lambda: self.reply(False),
             "reply-all": lambda: self.reply(True), "forward": self.forward,
             "delete": self.delete_selected, "archive": self.archive_selected,
             "move": self.move_selected, "mark-read": lambda: self.mark_selected(True),
@@ -312,9 +322,25 @@ class MainWindow(Gtk.ApplicationWindow):
         esc.connect("key-pressed", self._menubar_escape)
         self.add_controller(esc)
 
+    def _menu_active(self):
+        return (focus_within(self, self.menubar) or
+                focus_within(self, self.msg_menu) or
+                any(isinstance(w, Gtk.Popover) and w.get_mapped()
+                    for w in self._menu_widgets()))
+
+    def _menu_widgets(self):
+        stack = [self.menubar, self.msg_menu]
+        while stack:
+            widget = stack.pop()
+            yield widget
+            child = widget.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+
     def _track_focus(self, *_):
         w = self.get_focus()
-        if w is not None and not focus_within(self, self.menubar):
+        if w is not None and not self._menu_active():
             self._last_focus = w
 
     def _menubar_escape(self, _c, keyval, _code, state):
@@ -335,6 +361,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return True
 
     def _tab_key(self, _c, keyval, _code, state):
+        # Popover menus own their keyboard navigation, including Tab.
+        if self._menu_active():
+            return False
         if keyval not in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Tab):
             return False
         if mods(state) & ~Gdk.ModifierType.SHIFT_MASK:
@@ -355,7 +384,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 self.sessions.pop(acct_id).shutdown()
         for a in self.cfg.accounts:
             if a.id not in self.sessions:
-                self.sessions[a.id] = AccountSession(a, self.store)
+                self.sessions[a.id] = AccountSession(a, self.store, self.app.drafts)
             else:
                 self.sessions[a.id].account = a
         self.account_list.remove_all()
@@ -382,6 +411,8 @@ class MainWindow(Gtk.ApplicationWindow):
         acct = row.account
         if self.account and self.account.id == acct.id and self.tree:
             return
+        self._search = None
+        self._search_generation += 1
         self.account = acct
         self.folder = None
         self.tree = []
@@ -512,6 +543,8 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         if self.folder and self.folder.path == item.folder.path:
             return
+        self._search = None
+        self._search_generation += 1
         self.folder = item.folder
         self.msg_heading.set_text(f"{item.node.name}, {self.account.name}")
         # Orca speaks the list's name on entering it, so say which folder this is.
@@ -599,7 +632,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._populating = False
         if not msgs:
             name = self.folder.display_name if self.folder else "This folder"
-            self._show_empty(f"{name} is empty.")
+            self._show_empty("No messages match this search. Escape returns to the folder." if self._search else f"{name} is empty.")
             self._clear_reading()
         else:
             self.msg_stack.set_visible_child_name("list")
@@ -656,7 +689,14 @@ class MainWindow(Gtk.ApplicationWindow):
         return list(it.messages)
 
     def _message_key(self, keyval, state):
+        # The context popover is parented to this view; its keys must not expand
+        # conversations or run sender type-ahead behind the open menu.
+        if self._menu_active():
+            return False
         m = mods(state)
+        if keyval == Gdk.KEY_Escape and not m and self._search is not None:
+            self.clear_search()
+            return True
         if not m and keyval in (Gdk.KEY_Right, Gdk.KEY_Left):
             return self._tree_arrow(self.msg_view, self.msg_sel, keyval == Gdk.KEY_Right)
         if (keyval == Gdk.KEY_Menu and not m) or (keyval == Gdk.KEY_F10 and m == Gdk.ModifierType.SHIFT_MASK):
@@ -894,7 +934,7 @@ class MainWindow(Gtk.ApplicationWindow):
         where = self.folder.display_name
         tail = f"{where} is now empty" if left == 0 else f"{left} left in {where}"
         self.say(f"{spoken}{what}. {tail}")
-        on_error = lambda e: (self._error(e), self.sync_current())  # noqa: E731
+        on_error = lambda e: (self._error(e), self._request_search() if self._search else self.sync_current())  # noqa: E731
         if forever:
             sess.submit(sess.delete_forever, path, uids, on_error=on_error)
         else:
@@ -991,7 +1031,153 @@ class MainWindow(Gtk.ApplicationWindow):
         if not self.cfg.accounts:
             return self.say("Add an account first", important=True)
         from .compose import ComposeWindow
-        ComposeWindow(self, account or self.account, draft).present()
+        if draft.id in self.composers:
+            self.composers[draft.id].present()
+            return
+        win = ComposeWindow(self, account or self.account or self.cfg.accounts[0], draft)
+        self.composers[draft.id] = win
+        win.present()
+
+    def _announce_drafts(self):
+        count = len(self.app.drafts.list())
+        if count:
+            announce(self, f"{count} saved drafts. Open File, Saved Drafts to resume writing.")
+        return False
+
+    def show_drafts(self):
+        from .pickers import _Picker
+        drafts = self.app.drafts.list()
+        if not drafts:
+            return self.say("No saved drafts")
+        entries = []
+        for draft_id, account_id, updated, data in drafts:
+            account = self.cfg.account(account_id)
+            name = account.name if account else "Removed account"
+            state = data.get("delivery_state", "draft")
+            note = ", delivery needs checking" if state in ("sending", "uncertain") else ""
+            entries.append((f"{data.get('subject') or '(no subject)'}, {name}, "
+                            f"{data.get('to') or data.get('cc') or 'no recipients'}, "
+                            f"{threads.friendly_date(updated)}{note}", draft_id))
+
+        def resume(draft_id):
+            account_id, draft, cursor = self.app.drafts.load(draft_id)
+            account = self.cfg.account(account_id)
+            def open_with(chosen):
+                self._open_compose(draft, chosen)
+                win = self.composers[draft.id]
+                buf = win.body.get_buffer()
+                buf.place_cursor(buf.get_iter_at_offset(min(cursor, buf.get_char_count())))
+            if account is None:
+                if not self.cfg.accounts:
+                    return self.say("Add an account before opening this draft.", True)
+                replacement = self.account or self.cfg.accounts[0]
+                self._confirm("Use another sending account?",
+                              f"The original account was removed. Use {replacement.email} for this draft?",
+                              "_Use Account", lambda: open_with(replacement))
+                return
+            open_with(account)
+        _Picker(self, "Saved Drafts", "_Find draft", entries, resume).present()
+
+    def show_local_sent(self):
+        import json
+        from .pickers import _Picker, LocalSentWindow
+        copies = self.app.drafts.list_sent()
+        if not copies:
+            return self.say("No local sent copies")
+        entries = []
+        for copy_id, account_id, created, recipients in copies:
+            account = self.cfg.account(account_id)
+            entries.append((f"{threads.friendly_date(created)}, "
+                            f"{account.name if account else 'removed account'}, accepted for "
+                            + ", ".join(json.loads(recipients)), (copy_id, recipients)))
+        def read(value):
+            copy_id, recipients = value
+            raw = self.app.drafts.sent_raw(copy_id)
+            LocalSentWindow(self, copy_id, raw, json.loads(recipients)).present()
+        _Picker(self, "Local Sent Copies", "_Find copy", entries, read).present()
+
+    def show_search(self):
+        if not self.folder or not self.account:
+            return self.say("Choose a folder first")
+        from .pickers import SearchWindow
+        account_id, path = self.account.id, self.folder.path
+        def begin(query, offline):
+            if self.account and self.folder and (self.account.id, self.folder.path) == (account_id, path):
+                self._start_search(query, offline)
+            else:
+                self.say("The folder changed. Open search again.")
+        SearchWindow(self, begin).present()
+
+    def _start_search(self, query, offline):
+        current = self._selected_item()
+        if self._search is None:
+            self._search_return_key = current.key if current else None
+        self._search_generation += 1
+        self._search = (query, offline)
+        self._request_search()
+
+    def _request_search(self, more=False):
+        if not self._search or not self.account or not self.folder:
+            return
+        self._search_generation += 1
+        generation = self._search_generation
+        account_id, path = self.account.id, self.folder.path
+        query, offline = self._search
+        before = min((m.uid for m in self.messages), default=None) if more else None
+        self.say("Searching downloaded mail…" if offline else "Searching the server…")
+        def finished(result):
+            if (generation != self._search_generation or not self.account or not self.folder or
+                    (self.account.id, self.folder.path) != (account_id, path)):
+                return
+            messages, has_more = result
+            if more:
+                messages = list({m.key: m for m in self.messages + messages}.values())
+            self._populate(messages)
+            set_label(self.msg_view, f"Search results in {self.folder.display_name}")
+            self.focus_messages()
+            self.say(f"{len(messages)} search results. " +
+                     ("More results are available with Load Older Messages. " if has_more else "") +
+                     "Escape in the message list returns to the folder.")
+        def failed(error):
+            if generation == self._search_generation:
+                self.clear_search()
+                self._error(error)
+        self._session().submit(self._session().search, path, query, before, offline,
+                               on_done=finished, on_error=failed)
+
+    def clear_search(self):
+        if self._search is None:
+            return
+        self._search = None
+        self._search_generation += 1
+        if self.account and self.folder:
+            set_label(self.msg_view, f"{self.folder.display_name} messages")
+            self._populate(self.store.messages(self.account.id, self.folder.path), keep_key=self._search_return_key)
+            self.focus_messages()
+            self.say("Search cleared")
+
+    def load_older(self):
+        if not self.folder or not self.account:
+            return self.say("Choose a folder first")
+        if self._search is not None:
+            if not self.messages:
+                return self.say("No search results to page through")
+            return self._request_search(more=True)
+        if self._loading_more:
+            return self.say("Older messages are still loading")
+        self._loading_more = True
+        account_id, path = self.account.id, self.folder.path
+        self.say("Loading older messages…")
+        def finished(result):
+            self._loading_more = False
+            if self.account and self.folder and (self.account.id, self.folder.path) == (account_id, path) and self._search is None:
+                self._populate(self.store.messages(account_id, path))
+                count, has_more = result
+                self.say(f"Loaded {count} older messages. " + ("More are available." if has_more else "No older messages remain."))
+        def failed(error):
+            self._loading_more = False
+            self._error(error)
+        self._session().submit(self._session().load_older, path, on_done=finished, on_error=failed)
 
     def message_sent(self, draft):
         self.say("Message sent")
@@ -1026,7 +1212,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _synced(self, acct: Account, path: str, result, announce_new: bool):
         if not (self.account and self.folder and acct.id == self.account.id and path == self.folder.path):
             return
-        if result.changed or not self.messages:
+        if self._search is None and (result.changed or not self.messages):
             self._populate(self.store.messages(acct.id, path))
         self.last_sync = time.time()
         self._update_status()
@@ -1055,6 +1241,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.say(text)
 
     def refresh(self):
+        if self._search is not None:
+            return self._request_search()
         if not self.account:
             return
         self.say("Checking for mail")
@@ -1081,7 +1269,7 @@ class MainWindow(Gtk.ApplicationWindow):
         return GLib.SOURCE_CONTINUE
 
     def _background_synced(self, acct: Account, path: str, result):
-        if result.changed and self.account and self.folder and \
+        if self._search is None and result.changed and self.account and self.folder and \
                 (acct.id, path) == (self.account.id, self.folder.path):
             self._populate(self.store.messages(acct.id, path))
         self._notify_new(acct, result)
@@ -1124,15 +1312,37 @@ class MainWindow(Gtk.ApplicationWindow):
         from .account_dialog import AccountDialog
         AccountDialog(self, None, self._account_saved).present()
 
+    def _sending_for(self, account_id):
+        return any(not win.send_btn.get_sensitive() and
+                   win.accounts[win.from_dd.get_selected()].id == account_id
+                   for win in self.composers.values())
+
     def edit_account(self):
+        if self.account and self._sending_for(self.account.id):
+            return self.say("Wait for sending to finish before editing this account.", True)
         if not self.account:
             return self.say("No account selected")
         from .account_dialog import AccountDialog
         AccountDialog(self, self.account, self._account_saved).present()
 
     def _account_saved(self, acct: Account, is_new: bool):
+        if not is_new and self._sending_for(acct.id):
+            first = acct.id not in self._deferred_accounts
+            self._deferred_accounts[acct.id] = acct
+            if first:
+                def later():
+                    if self._sending_for(acct.id):
+                        return True
+                    pending = self._deferred_accounts.pop(acct.id)
+                    self._account_saved(pending, False)
+                    return False
+                GLib.timeout_add(250, later)
+            self.say("Account settings will be saved after sending finishes.")
+            return
         if is_new:
             self.cfg.accounts.append(acct)
+        else:
+            self.cfg.accounts = [acct if existing.id == acct.id else existing for existing in self.cfg.accounts]
         self.cfg.save()
         if not is_new and acct.id in self.sessions:
             self.sessions.pop(acct.id).shutdown()
@@ -1141,6 +1351,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.say(f"Account {acct.name} {'added' if is_new else 'saved'}")
 
     def remove_account(self):
+        if self.account and self._sending_for(self.account.id):
+            return self.say("Wait for sending to finish before removing this account.", True)
         acct = self.account
         if not acct:
             return self.say("No account selected")
@@ -1161,16 +1373,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     # ===== helpers ==========================================================================
     def _confirm(self, message: str, detail: str, ok_label: str, on_ok):
-        d = Gtk.AlertDialog(message=message, detail=detail, buttons=["_Cancel", ok_label],
-                            cancel_button=0, default_button=0, modal=True)
-
-        def done(dlg, res):
-            try:
-                if dlg.choose_finish(res) == 1:
-                    on_ok()
-            except GLib.Error:
-                pass
-        d.choose(self, None, done)
+        from .common import confirm
+        confirm(self, message, detail, "_Cancel", ok_label, on_ok)
 
     def show_shortcuts(self):
         from .pickers import ShortcutsWindow
@@ -1191,14 +1395,29 @@ class MainWindow(Gtk.ApplicationWindow):
         if not self.folder:
             return
         unread = sum(1 for m in self.messages if not m.seen)
-        parts = [self.folder.display_name, f"{len(self.messages)} messages"]
+        parts = [self.folder.display_name, f"{len(self.messages)} search results" if self._search else f"{len(self.messages)} messages"]
         if unread:
             parts.append(f"{unread} unread")
         if getattr(self, "last_sync", None):
             parts.append("checked " + time.strftime("%-I:%M %p", time.localtime(self.last_sync)))
         self._set_status(", ".join(parts))
 
+    def prepare_close(self):
+        for composer in list(self.composers.values()):
+            if not composer.send_btn.get_sensitive():
+                composer.present()
+                composer._say("Wait for sending to finish before quitting Postroom.", True)
+                return False
+            if not composer.save_draft(quiet=True):
+                composer.present()
+                return False
+        for composer in list(self.composers.values()):
+            composer.destroy()
+        return True
+
     def _on_close(self, *_):
+        if not self.prepare_close():
+            return True
         w, h = self.get_default_size()
         self.cfg.settings.window_width, self.cfg.settings.window_height = w, h
         self.cfg.save()
